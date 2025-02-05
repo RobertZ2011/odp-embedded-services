@@ -16,11 +16,18 @@ defmt = { version = "0.3", optional = true }
 log = { version = "0.4.14", optional = true }
 
 [features]
-default = ["defmt"]
+default = []
 defmt = [
     "dep:defmt",
     "embedded-services/defmt",
     "embassy-time/defmt",
     "embassy-sync/defmt",
     "embassy-executor/defmt",
+]
+log = [
+    "dep:log",
+    "embedded-services/log",
+    "embassy-time/log",
+    "embassy-sync/log",
+    "embassy-executor/log",
 ]

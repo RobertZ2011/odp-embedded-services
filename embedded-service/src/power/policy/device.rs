@@ -1,15 +1,11 @@
 //! Device struct and methods
 use core::ops::DerefMut;
 
-use embassy_sync::{
-    blocking_mutex::raw::NoopRawMutex,
-    channel::Channel,
-    mutex::{Mutex, MutexGuard},
-};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, channel::Channel, mutex::Mutex};
 
 use crate::{info, intrusive_list, warn};
 
-use super::context::*;
+use super::policy;
 use super::{DeviceId, Error, PowerCapability};
 
 /// Current state of the attached power device
@@ -39,7 +35,7 @@ struct InternalState {
 /// Data for a device request
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum DeviceRequestData {
+pub enum RequestData {
     /// Start sinking on this port
     ConnectSink(PowerCapability),
     /// Start sourcing on this port
@@ -51,34 +47,34 @@ pub enum DeviceRequestData {
 /// Request from power policy service to a device
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct DeviceRequest {
+pub struct Request {
     /// Target device
     pub id: DeviceId,
     /// Request data
-    pub data: DeviceRequestData,
+    pub data: RequestData,
 }
 
 /// Data for a device response
-pub enum DeviceResponseData {
+pub enum ResponseData {
     /// The request was successful
     Complete,
 }
 
 /// Wrapper type to make code cleaner
-pub type InternalDeviceResponseData = Result<DeviceResponseData, Error>;
+pub type InternalResponseData = Result<ResponseData, Error>;
 
 /// Response from a device to the power policy service
-pub struct DeviceResponse {
+pub struct Response {
     /// Target device
     pub id: DeviceId,
     /// Response data
-    pub data: DeviceResponseData,
+    pub data: ResponseData,
 }
 
 /// Channel size for device requests
 pub const DEVICE_CHANNEL_SIZE: usize = 1;
 
-/// Internal state for the power policy service
+/// Device struct
 pub struct Device {
     /// Intrusive list node
     node: intrusive_list::Node,
@@ -87,9 +83,9 @@ pub struct Device {
     /// Current state of the device
     state: Mutex<NoopRawMutex, InternalState>,
     /// Channel for requests to the device
-    request: Channel<NoopRawMutex, DeviceRequestData, DEVICE_CHANNEL_SIZE>,
+    request: Channel<NoopRawMutex, RequestData, DEVICE_CHANNEL_SIZE>,
     /// Channel for responses from the device
-    response: Channel<NoopRawMutex, InternalDeviceResponseData, DEVICE_CHANNEL_SIZE>,
+    response: Channel<NoopRawMutex, InternalResponseData, DEVICE_CHANNEL_SIZE>,
 }
 
 impl Device {
@@ -112,146 +108,59 @@ impl Device {
         self.id
     }
 
-    /// Sends a request to this device and returns a response
-    async fn execute_device_request(&self, request: DeviceRequestData) -> Result<DeviceResponseData, Error> {
-        self.request.send(request).await;
-        self.response.receive().await
-    }
-
-    /// Provides exclusive access to the device state
-    async fn lock_state(&self) -> MutexGuard<'_, NoopRawMutex, InternalState> {
-        self.state.lock().await
-    }
-
     /// Returns the current state of the device
     pub async fn state(&self) -> State {
-        self.lock_state().await.state
+        self.state.lock().await.state
     }
 
     /// Returns the current sink capability of the device
     pub async fn sink_capability(&self) -> Option<PowerCapability> {
-        self.lock_state().await.sink_capability
+        self.state.lock().await.sink_capability
     }
 
-    /// Notify the power policy service that this device has attached
-    pub async fn policy_notify_attached(&self) -> Result<(), Error> {
-        info!("Received attach from device {}", self.id().0);
-
-        {
-            let mut lock = self.lock_state().await;
-            let state = lock.deref_mut();
-            if state.state != State::Detached {
-                warn!("Received attach request for device that is not detached");
-            }
-
-            state.state = State::Attached;
-        }
-
-        let _ = send_policy_request(self.id, PolicyRequestData::NotifyAttached).await?;
-        Ok(())
+    /// Returns true if the device is currently sinking power
+    pub async fn is_sink(&self) -> bool {
+        matches!(self.state().await, State::Sink(_))
     }
 
-    /// Notify the power policy service of an updated sink power capability
-    pub async fn policy_notify_sink_power_capability(&self, capability: Option<PowerCapability>) -> Result<(), Error> {
-        info!("Device {} sink capability updated {:#?}", self.id().0, capability);
-
-        {
-            let mut lock = self.lock_state().await;
-            let state = lock.deref_mut();
-            if state.state == State::Detached {
-                warn!("Received sink capability for device that is not attached");
-            }
-
-            state.sink_capability = capability;
-        }
-        let _ = send_policy_request(self.id, PolicyRequestData::NotifySinkPowerCapability(capability)).await?;
-        Ok(())
-    }
-
-    /// Request the given power from the power policy service
-    pub async fn policy_request_source_power_capability(&self, capability: PowerCapability) -> Result<(), Error> {
-        info!("Request source from device {}, {:#?}", self.id.0, capability);
-
-        {
-            let mut lock = self.lock_state().await;
-            let state = lock.deref_mut();
-            if state.state != State::Attached {
-                warn!("Received request source power capability for device that is not attached");
-            }
-        }
-
-        let _ = send_policy_request(self.id, PolicyRequestData::RequestSourcePowerCapability(capability)).await?;
-        Ok(())
-    }
-
-    /// Notify the power policy service that this device cannot source or sink power anymore
-    pub async fn policy_notify_disconnect(&self) -> Result<(), Error> {
-        info!("Received disconnect from device {}", self.id.0);
-
-        {
-            let mut lock = self.lock_state().await;
-            let state = lock.deref_mut();
-            if !matches!(state.state, State::Sink(_)) && !matches!(state.state, State::Source(_)) {
-                warn!("Received disconnect request for device that is not attached");
-            }
-
-            state.state = State::Attached;
-        }
-
-        let _ = send_policy_request(self.id, PolicyRequestData::NotifyDisconnect).await?;
-        Ok(())
-    }
-
-    /// Notify the power policy service that this device has detached
-    pub async fn policy_notify_detached(&self) -> Result<(), Error> {
-        info!("Received detach from device {}", self.id.0);
-
-        {
-            let mut lock = self.lock_state().await;
-            let state = lock.deref_mut();
-            if state.state == State::Detached {
-                warn!("Received detach request for device that is not attached");
-            }
-
-            state.state = State::Detached;
-        }
-
-        let _ = send_policy_request(self.id, PolicyRequestData::NotifyDetached).await?;
-        Ok(())
+    /// Sends a request to this device and returns a response
+    async fn execute_device_request(&self, request: RequestData) -> Result<ResponseData, Error> {
+        self.request.send(request).await;
+        self.response.receive().await
     }
 
     /// Connect this device as a sink
-    pub async fn device_connect_sink(&self, capability: PowerCapability) -> Result<(), Error> {
+    pub async fn connect_sink(&self, capability: PowerCapability) -> Result<(), Error> {
         info!("Device {} connecting sink", self.id.0);
 
         let _ = self
-            .execute_device_request(DeviceRequestData::ConnectSink(capability))
+            .execute_device_request(RequestData::ConnectSink(capability))
             .await?;
 
         {
-            let mut lock = self.lock_state().await;
+            let mut lock = self.state.lock().await;
             let state = lock.deref_mut();
             if state.state != State::Attached {
                 warn!("Received connect sink request for device that is not attached");
             }
 
-            state.state = State::Source(capability);
+            state.state = State::Sink(capability);
         }
         Ok(())
     }
 
     /// Connect this device as a source
-    pub async fn device_connect_source(&self, capability: PowerCapability) -> Result<(), Error> {
+    pub async fn connect_source(&self, capability: PowerCapability) -> Result<(), Error> {
         info!("Device {} connecting source", self.id.0);
 
         let _ = self
-            .execute_device_request(DeviceRequestData::ConnectSource(capability))
+            .execute_device_request(RequestData::ConnectSource(capability))
             .await?;
 
         {
-            let mut lock = self.lock_state().await;
+            let mut lock = self.state.lock().await;
             let state = lock.deref_mut();
-            if state.state != State::Detached {
+            if state.state != State::Attached {
                 warn!("Received connect source request for device that is not attached");
             }
 
@@ -261,21 +170,131 @@ impl Device {
     }
 
     /// Disconnect this device
-    pub async fn device_disconnect(&self) -> Result<(), Error> {
+    pub async fn disconnect(&self) -> Result<(), Error> {
         info!("Device {} disconnecting", self.id.0);
 
-        let _ = self.execute_device_request(DeviceRequestData::Disconnect).await?;
+        let _ = self.execute_device_request(RequestData::Disconnect).await?;
 
         {
-            let mut lock = self.lock_state().await;
+            let mut lock = self.state.lock().await;
             let state = lock.deref_mut();
 
             if !matches!(state.state, State::Sink(_)) && !matches!(state.state, State::Source(_)) {
-                warn!("Received disconnect request for device that is not sourcing or sinking");
+                warn!(
+                    "Disconnect request for device that is not sourcing or sinking, state: {:?}",
+                    state.state
+                );
             }
 
             state.state = State::Attached;
         }
+        Ok(())
+    }
+
+    /// Wait for a request
+    pub async fn wait_request(&self) -> RequestData {
+        self.request.receive().await
+    }
+
+    /// Send a response
+    pub async fn send_response(&self, response: InternalResponseData) {
+        self.response.send(response).await;
+    }
+
+    /// Provide access to the power policy service
+    pub fn policy<'a>(&'a self) -> PolicyInterface<'a> {
+        PolicyInterface(self)
+    }
+}
+
+/// Struct that provides functions to send requests to the power policy from a specific device
+pub struct PolicyInterface<'a>(&'a Device);
+
+impl PolicyInterface<'_> {
+    /// Notify the power policy service that this device has attached
+    pub async fn notify_attached(&self) -> Result<(), Error> {
+        info!("Received attach from device {}", self.0.id().0);
+
+        {
+            let mut lock = self.0.state.lock().await;
+            let state = lock.deref_mut();
+            if state.state != State::Detached {
+                warn!("Received attach request for device that is not detached");
+            }
+
+            state.state = State::Attached;
+        }
+
+        let _ = policy::send_request(self.0.id, policy::RequestData::NotifyAttached).await?;
+        Ok(())
+    }
+
+    /// Notify the power policy service of an updated sink power capability
+    pub async fn notify_sink_power_capability(&self, capability: Option<PowerCapability>) -> Result<(), Error> {
+        info!("Device {} sink capability updated {:#?}", self.0.id().0, capability);
+
+        {
+            let mut lock = self.0.state.lock().await;
+            let state = lock.deref_mut();
+            if state.state == State::Detached {
+                warn!("Received sink capability for device that is not attached");
+            }
+
+            state.sink_capability = capability;
+        }
+        let _ = policy::send_request(self.0.id, policy::RequestData::NotifySinkPowerCapability(capability)).await?;
+        Ok(())
+    }
+
+    /// Request the given power from the power policy service
+    pub async fn request_source_power_capability(&self, capability: PowerCapability) -> Result<(), Error> {
+        info!("Request source from device {}, {:#?}", self.0.id.0, capability);
+
+        {
+            let mut lock = self.0.state.lock().await;
+            let state = lock.deref_mut();
+            if state.state != State::Attached {
+                warn!("Received request source power capability for device that is not attached");
+            }
+        }
+
+        let _ = policy::send_request(self.0.id, policy::RequestData::RequestSourcePowerCapability(capability)).await?;
+        Ok(())
+    }
+
+    /// Notify the power policy service that this device cannot source or sink power anymore
+    pub async fn notify_disconnect(&self) -> Result<(), Error> {
+        info!("Received disconnect from device {}", self.0.id.0);
+
+        {
+            let mut lock = self.0.state.lock().await;
+            let state = lock.deref_mut();
+            if !matches!(state.state, State::Sink(_)) && !matches!(state.state, State::Source(_)) {
+                warn!("Received disconnect request for device that is not attached");
+            }
+
+            state.state = State::Attached;
+        }
+
+        let _ = policy::send_request(self.0.id, policy::RequestData::NotifyDisconnect).await?;
+        Ok(())
+    }
+
+    /// Notify the power policy service that this device has detached
+    pub async fn notify_detached(&self) -> Result<(), Error> {
+        info!("Received detach from device {}", self.0.id.0);
+
+        {
+            let mut lock = self.0.state.lock().await;
+            let state = lock.deref_mut();
+            if state.state == State::Detached {
+                warn!("Received detach request for device that is not attached");
+            }
+
+            state.state = State::Detached;
+        }
+
+        let _ = policy::send_request(self.0.id, policy::RequestData::NotifyDetached).await?;
         Ok(())
     }
 }
