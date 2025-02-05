@@ -38,7 +38,7 @@ macro_rules! define_i2c_passthrough_host_task {
             int_signal: &'static $crate::i2c::passthrough::InterruptSignal<$int_in, $int_out>,
         ) {
             use ::embassy_sync::once_lock::OnceLock;
-            use ::embedded_services::{define_static_buffer, error, info, transport};
+            use ::embedded_services::{comms, define_static_buffer, error, info};
             use $crate::i2c::Host;
 
             info!("Creating HIDI2C Host");
