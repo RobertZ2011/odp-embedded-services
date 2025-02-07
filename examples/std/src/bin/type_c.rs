@@ -91,11 +91,13 @@ async fn task(spawner: Spawner) {
     // Wait for controller to be registered
     Timer::after_secs(1).await;
 
-    controller::reset_controller(CONTROLLER0).await.unwrap();
+    let context = controller::ContextToken::create().unwrap();
+
+    context.reset_controller(CONTROLLER0).await.unwrap();
     info!("Reset controller done");
-    controller::reset_port(PORT0, lpm::ResetType::Hard).await.unwrap();
+    context.reset_port(PORT0, lpm::ResetType::Hard).await.unwrap();
     info!("Reset port 0 done");
-    controller::reset_port(PORT1, lpm::ResetType::Data).await.unwrap();
+    context.reset_port(PORT1, lpm::ResetType::Data).await.unwrap();
     info!("Reset port 1 done");
 }
 

@@ -1,4 +1,6 @@
 //! PD controller related code
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::once_lock::OnceLock;
@@ -127,101 +129,124 @@ pub async fn register_controller(controller: &'static impl ControllerContainer) 
     CONTEXT.get().await.controllers.push(controller.get_controller())
 }
 
-/// Default timeout for PD controller commands
-const DEFAULT_TIMEOUT: Duration = Duration::from_millis(250);
+const DEFAULT_TIMEOUT: Duration = Duration::from_millis(2500);
 
-/// Send a command to the given controller with no timeout
-async fn send_controller_command_no_timeout(
-    controller_id: ControllerId,
-    command: InternalCommandData,
-) -> Result<InternalResponseData, Error> {
-    let node = CONTEXT
-        .get()
-        .await
-        .controllers
-        .into_iter()
-        .find(|node| {
-            if let Some(controller) = node.data::<Controller>() {
-                controller.id == controller_id
-            } else {
-                false
-            }
-        })
-        .map_or(Error::InvalidController.into(), Ok)?;
+/// Type to provide exclusive access to the PD controller context
+pub struct ContextToken(());
 
-    match node
-        .data::<Controller>()
-        .ok_or(Error::InvalidController)?
-        .send_command(Command::Controller(command))
-        .await
-    {
-        Response::Controller(response) => response,
-        _ => Error::InvalidResponse.into(),
+impl ContextToken {
+    /// Create a new context token, returning None if this function has been called before
+    pub fn create() -> Option<Self> {
+        static INIT: AtomicBool = AtomicBool::new(false);
+        if INIT.load(Ordering::SeqCst) {
+            return None;
+        }
+
+        INIT.store(true, Ordering::SeqCst);
+        Some(ContextToken(()))
     }
-}
 
-/// Send a command to the given controller with a timeout
-async fn send_controller_command(
-    controller_id: ControllerId,
-    command: InternalCommandData,
-    timeout: Duration,
-) -> Result<InternalResponseData, Error> {
-    match with_timeout(timeout, send_controller_command_no_timeout(controller_id, command)).await {
-        Ok(response) => response,
-        Err(_) => Error::Timeout.into(),
+    /// Send a command to the given controller with no timeout
+    pub async fn send_controller_command_no_timeout(
+        &self,
+        controller_id: ControllerId,
+        command: InternalCommandData,
+    ) -> Result<InternalResponseData, Error> {
+        let node = CONTEXT
+            .get()
+            .await
+            .controllers
+            .into_iter()
+            .find(|node| {
+                if let Some(controller) = node.data::<Controller>() {
+                    controller.id == controller_id
+                } else {
+                    false
+                }
+            })
+            .map_or(Error::InvalidController.into(), Ok)?;
+
+        match node
+            .data::<Controller>()
+            .ok_or(Error::InvalidController)?
+            .send_command(Command::Controller(command))
+            .await
+        {
+            Response::Controller(response) => response,
+            _ => Error::InvalidResponse.into(),
+        }
     }
-}
 
-/// Reset the given controller
-pub async fn reset_controller(controller_id: ControllerId) -> Result<(), Error> {
-    send_controller_command(controller_id, InternalCommandData::Reset, DEFAULT_TIMEOUT)
-        .await
-        .map(|_| ())
-}
-
-/// Send a command to the given port
-async fn send_port_command_no_timeout(port_id: PortId, command: lpm::CommandData) -> Result<lpm::ResponseData, Error> {
-    let node = CONTEXT
-        .get()
-        .await
-        .controllers
-        .into_iter()
-        .find(|node| {
-            if let Some(controller) = node.data::<Controller>() {
-                controller.has_port(port_id)
-            } else {
-                false
-            }
-        })
-        .map_or(Error::InvalidPort.into(), Ok)?;
-
-    match node
-        .data::<Controller>()
-        .ok_or(Error::InvalidController)?
-        .send_command(Command::Lpm(lpm::Command {
-            port: port_id,
-            operation: command,
-        }))
-        .await
-    {
-        Response::Lpm(response) => response,
-        _ => Error::InvalidResponse.into(),
+    /// Send a command to the given controller with a timeout
+    pub async fn send_controller_command(
+        &self,
+        controller_id: ControllerId,
+        command: InternalCommandData,
+        timeout: Duration,
+    ) -> Result<InternalResponseData, Error> {
+        match with_timeout(timeout, self.send_controller_command_no_timeout(controller_id, command)).await {
+            Ok(response) => response,
+            Err(_) => Error::Timeout.into(),
+        }
     }
-}
 
-/// Send a command to the given port with a timeout
-async fn send_port_command(
-    port_id: PortId,
-    command: lpm::CommandData,
-    timeout: Duration,
-) -> Result<lpm::ResponseData, Error> {
-    match with_timeout(timeout, send_port_command_no_timeout(port_id, command)).await {
-        Ok(response) => response,
-        Err(_) => Error::Timeout.into(),
+    /// Reset the given controller
+    pub async fn reset_controller(&self, controller_id: ControllerId) -> Result<(), Error> {
+        self.send_controller_command(controller_id, InternalCommandData::Reset, DEFAULT_TIMEOUT)
+            .await
+            .map(|_| ())
     }
-}
 
-/// Resets the given port
-pub async fn reset_port(port_id: PortId, reset_type: lpm::ResetType) -> Result<lpm::ResponseData, Error> {
-    send_port_command(port_id, lpm::CommandData::ConnectorReset(reset_type), DEFAULT_TIMEOUT).await
+    /// Send a command to the given port
+    pub async fn send_port_command_no_timeout(
+        &self,
+        port_id: PortId,
+        command: lpm::CommandData,
+    ) -> Result<lpm::ResponseData, Error> {
+        let node = CONTEXT
+            .get()
+            .await
+            .controllers
+            .into_iter()
+            .find(|node| {
+                if let Some(controller) = node.data::<Controller>() {
+                    controller.has_port(port_id)
+                } else {
+                    false
+                }
+            })
+            .map_or(Error::InvalidPort.into(), Ok)?;
+
+        match node
+            .data::<Controller>()
+            .ok_or(Error::InvalidController)?
+            .send_command(Command::Lpm(lpm::Command {
+                port: port_id,
+                operation: command,
+            }))
+            .await
+        {
+            Response::Lpm(response) => response,
+            _ => Error::InvalidResponse.into(),
+        }
+    }
+
+    /// Send a command to the given port with a timeout
+    pub async fn send_port_command(
+        &self,
+        port_id: PortId,
+        command: lpm::CommandData,
+        timeout: Duration,
+    ) -> Result<lpm::ResponseData, Error> {
+        match with_timeout(timeout, self.send_port_command_no_timeout(port_id, command)).await {
+            Ok(response) => response,
+            Err(_) => Error::Timeout.into(),
+        }
+    }
+
+    /// Resets the given port
+    pub async fn reset_port(&self, port_id: PortId, reset_type: lpm::ResetType) -> Result<lpm::ResponseData, Error> {
+        self.send_port_command(port_id, lpm::CommandData::ConnectorReset(reset_type), DEFAULT_TIMEOUT)
+            .await
+    }
 }
