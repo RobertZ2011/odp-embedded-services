@@ -8,7 +8,7 @@ use embassy_time::{with_timeout, Duration};
 
 use super::ucsi::lpm;
 use super::{ControllerId, Error, PortId};
-use crate::intrusive_list;
+use crate::{intrusive_list, power};
 
 /// PD controller command-specific data
 #[derive(Copy, Clone, Debug)]
@@ -50,7 +50,7 @@ pub enum Response {
 }
 
 /// PD controller
-pub struct Controller<'a> {
+pub struct Device<'a> {
     node: intrusive_list::Node,
     id: ControllerId,
     ports: &'a [PortId],
@@ -58,13 +58,13 @@ pub struct Controller<'a> {
     response: Channel<NoopRawMutex, Response, 1>,
 }
 
-impl intrusive_list::NodeContainer for Controller<'static> {
+impl intrusive_list::NodeContainer for Device<'static> {
     fn get_node(&self) -> &intrusive_list::Node {
         &self.node
     }
 }
 
-impl<'a> Controller<'a> {
+impl<'a> Device<'a> {
     /// Create a new PD controller struct
     pub fn new(id: ControllerId, ports: &'a [PortId]) -> Self {
         Self {
@@ -99,10 +99,15 @@ impl<'a> Controller<'a> {
 }
 
 /// Trait for types that contain a controller struct
-pub trait ControllerContainer {
+pub trait DeviceContainer {
     /// Get the controller struct
-    fn get_controller<'a>(&'a self) -> &'a Controller<'a>;
+    fn get_pd_controller_device<'a>(&'a self) -> &'a Device<'a>;
 }
+
+/// Messages that a PD controller must implement
+pub trait MessageInterface: DeviceContainer + power::policy::device::DeviceContainer {}
+
+impl<T: DeviceContainer + power::policy::device::DeviceContainer> MessageInterface for T {}
 
 /// Internal context for managing PD controllers
 struct Context {
@@ -125,11 +130,15 @@ pub fn init() {
 }
 
 /// Register a PD controller
-pub async fn register_controller(controller: &'static impl ControllerContainer) -> Result<(), intrusive_list::Error> {
-    CONTEXT.get().await.controllers.push(controller.get_controller())
+pub async fn register_controller(controller: &'static impl MessageInterface) -> Result<(), intrusive_list::Error> {
+    CONTEXT
+        .get()
+        .await
+        .controllers
+        .push(controller.get_pd_controller_device())
 }
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_millis(2500);
+const DEFAULT_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// Type to provide exclusive access to the PD controller context
 pub struct ContextToken(());
@@ -158,7 +167,7 @@ impl ContextToken {
             .controllers
             .into_iter()
             .find(|node| {
-                if let Some(controller) = node.data::<Controller>() {
+                if let Some(controller) = node.data::<Device>() {
                     controller.id == controller_id
                 } else {
                     false
@@ -167,7 +176,7 @@ impl ContextToken {
             .map_or(Error::InvalidController.into(), Ok)?;
 
         match node
-            .data::<Controller>()
+            .data::<Device>()
             .ok_or(Error::InvalidController)?
             .send_command(Command::Controller(command))
             .await
@@ -209,7 +218,7 @@ impl ContextToken {
             .controllers
             .into_iter()
             .find(|node| {
-                if let Some(controller) = node.data::<Controller>() {
+                if let Some(controller) = node.data::<Device>() {
                     controller.has_port(port_id)
                 } else {
                     false
@@ -218,7 +227,7 @@ impl ContextToken {
             .map_or(Error::InvalidPort.into(), Ok)?;
 
         match node
-            .data::<Controller>()
+            .data::<Device>()
             .ok_or(Error::InvalidController)?
             .send_command(Command::Lpm(lpm::Command {
                 port: port_id,
