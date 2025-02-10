@@ -1,4 +1,5 @@
 //! PD controller related code
+use core::cell::Cell;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
@@ -7,6 +8,7 @@ use embassy_sync::once_lock::OnceLock;
 use embassy_time::{with_timeout, Duration};
 use embedded_usb_pd::PdError;
 
+use super::event::PortEventFlags;
 use super::ucsi::lpm;
 use super::{ControllerId, GlobalPortId};
 use crate::{intrusive_list, power};
@@ -17,6 +19,8 @@ use crate::{intrusive_list, power};
 pub enum InternalCommandData {
     /// Reset the PD controller
     Reset,
+    /// Acknowledge a port event
+    AckEvent,
 }
 
 /// PD controller command
@@ -97,6 +101,12 @@ impl<'a> Device<'a> {
     pub async fn send_response(&self, response: Response) {
         self.response.send(response).await;
     }
+
+    /// Notify of a port event
+    pub async fn notify_ports(&self, events: PortEventFlags) {
+        let context = CONTEXT.get().await;
+        context.port_events.set(context.port_events.get() | events);
+    }
 }
 
 /// Trait for types that contain a controller struct
@@ -113,12 +123,14 @@ impl<T: DeviceContainer + power::policy::device::DeviceContainer> MessageInterfa
 /// Internal context for managing PD controllers
 struct Context {
     controllers: intrusive_list::IntrusiveList,
+    port_events: Cell<PortEventFlags>,
 }
 
 impl Context {
     fn new() -> Self {
         Self {
             controllers: intrusive_list::IntrusiveList::new(),
+            port_events: Cell::new(PortEventFlags(0)),
         }
     }
 }

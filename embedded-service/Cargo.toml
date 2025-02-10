@@ -43,6 +43,7 @@ embedded-usb-pd = { git = "https://github.com/OpenDevicePartnership/embedded-usb
 document-features = "0.2.7"
 
 bitfield = "0.17.0"
+bitflags = "2.8.0"
 
 [dev-dependencies]
 embassy-sync = { git = "https://github.com/embassy-rs/embassy", features = [

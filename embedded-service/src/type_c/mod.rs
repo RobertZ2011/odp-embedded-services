@@ -1,6 +1,7 @@
 //! Type-C service
 
 pub mod controller;
+pub mod event;
 pub mod ucsi;
 
 /// Global port ID, used to unique identify a port

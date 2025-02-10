@@ -50,6 +50,10 @@ mod test_controller {
                     info!("Reset controller");
                     Ok(controller::InternalResponseData::Complete)
                 }
+                _ => {
+                    info!("Other controller command");
+                    Ok(controller::InternalResponseData::Complete)
+                }
             }
         }
 
