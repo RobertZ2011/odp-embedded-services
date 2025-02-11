@@ -5,9 +5,10 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::{with_timeout, Duration};
+use embedded_usb_pd::PdError;
 
 use super::ucsi::lpm;
-use super::{ControllerId, Error, PortId};
+use super::{ControllerId, GlobalPortId};
 use crate::{intrusive_list, power};
 
 /// PD controller command-specific data
@@ -37,7 +38,7 @@ pub enum InternalResponseData {
 }
 
 /// Response for controller-specific commands
-pub type InternalResponse = Result<InternalResponseData, Error>;
+pub type InternalResponse = Result<InternalResponseData, PdError>;
 
 /// PD controller command response
 #[derive(Copy, Clone, Debug)]
@@ -53,7 +54,7 @@ pub enum Response {
 pub struct Device<'a> {
     node: intrusive_list::Node,
     id: ControllerId,
-    ports: &'a [PortId],
+    ports: &'a [GlobalPortId],
     command: Channel<NoopRawMutex, Command, 1>,
     response: Channel<NoopRawMutex, Response, 1>,
 }
@@ -66,7 +67,7 @@ impl intrusive_list::NodeContainer for Device<'static> {
 
 impl<'a> Device<'a> {
     /// Create a new PD controller struct
-    pub fn new(id: ControllerId, ports: &'a [PortId]) -> Self {
+    pub fn new(id: ControllerId, ports: &'a [GlobalPortId]) -> Self {
         Self {
             node: intrusive_list::Node::uninit(),
             id,
@@ -83,7 +84,7 @@ impl<'a> Device<'a> {
     }
 
     /// Check if this controller has the given port
-    pub fn has_port(&self, port: PortId) -> bool {
+    pub fn has_port(&self, port: GlobalPortId) -> bool {
         self.ports.iter().any(|p| *p == port)
     }
 
@@ -160,7 +161,7 @@ impl ContextToken {
         &self,
         controller_id: ControllerId,
         command: InternalCommandData,
-    ) -> Result<InternalResponseData, Error> {
+    ) -> Result<InternalResponseData, PdError> {
         let node = CONTEXT
             .get()
             .await
@@ -173,16 +174,16 @@ impl ContextToken {
                     false
                 }
             })
-            .map_or(Error::InvalidController.into(), Ok)?;
+            .map_or(Err(PdError::InvalidController), Ok)?;
 
         match node
             .data::<Device>()
-            .ok_or(Error::InvalidController)?
+            .ok_or(PdError::InvalidController)?
             .send_command(Command::Controller(command))
             .await
         {
             Response::Controller(response) => response,
-            _ => Error::InvalidResponse.into(),
+            _ => Err(PdError::InvalidResponse),
         }
     }
 
@@ -192,15 +193,15 @@ impl ContextToken {
         controller_id: ControllerId,
         command: InternalCommandData,
         timeout: Duration,
-    ) -> Result<InternalResponseData, Error> {
+    ) -> Result<InternalResponseData, PdError> {
         match with_timeout(timeout, self.send_controller_command_no_timeout(controller_id, command)).await {
             Ok(response) => response,
-            Err(_) => Error::Timeout.into(),
+            Err(_) => Err(PdError::Timeout),
         }
     }
 
     /// Reset the given controller
-    pub async fn reset_controller(&self, controller_id: ControllerId) -> Result<(), Error> {
+    pub async fn reset_controller(&self, controller_id: ControllerId) -> Result<(), PdError> {
         self.send_controller_command(controller_id, InternalCommandData::Reset, DEFAULT_TIMEOUT)
             .await
             .map(|_| ())
@@ -209,9 +210,9 @@ impl ContextToken {
     /// Send a command to the given port
     pub async fn send_port_command_no_timeout(
         &self,
-        port_id: PortId,
+        port_id: GlobalPortId,
         command: lpm::CommandData,
-    ) -> Result<lpm::ResponseData, Error> {
+    ) -> Result<lpm::ResponseData, PdError> {
         let node = CONTEXT
             .get()
             .await
@@ -224,11 +225,11 @@ impl ContextToken {
                     false
                 }
             })
-            .map_or(Error::InvalidPort.into(), Ok)?;
+            .map_or(Err(PdError::InvalidPort), Ok)?;
 
         match node
             .data::<Device>()
-            .ok_or(Error::InvalidController)?
+            .ok_or(PdError::InvalidController)?
             .send_command(Command::Lpm(lpm::Command {
                 port: port_id,
                 operation: command,
@@ -236,25 +237,29 @@ impl ContextToken {
             .await
         {
             Response::Lpm(response) => response,
-            _ => Error::InvalidResponse.into(),
+            _ => Err(PdError::InvalidResponse),
         }
     }
 
     /// Send a command to the given port with a timeout
     pub async fn send_port_command(
         &self,
-        port_id: PortId,
+        port_id: GlobalPortId,
         command: lpm::CommandData,
         timeout: Duration,
-    ) -> Result<lpm::ResponseData, Error> {
+    ) -> Result<lpm::ResponseData, PdError> {
         match with_timeout(timeout, self.send_port_command_no_timeout(port_id, command)).await {
             Ok(response) => response,
-            Err(_) => Error::Timeout.into(),
+            Err(_) => Err(PdError::Timeout),
         }
     }
 
     /// Resets the given port
-    pub async fn reset_port(&self, port_id: PortId, reset_type: lpm::ResetType) -> Result<lpm::ResponseData, Error> {
+    pub async fn reset_port(
+        &self,
+        port_id: GlobalPortId,
+        reset_type: lpm::ResetType,
+    ) -> Result<lpm::ResponseData, PdError> {
         self.send_port_command(port_id, lpm::CommandData::ConnectorReset(reset_type), DEFAULT_TIMEOUT)
             .await
     }

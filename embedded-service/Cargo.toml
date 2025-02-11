@@ -38,6 +38,7 @@ embedded-hal-02 = { package = "embedded-hal", version = "0.2.6", features = [
 embedded-hal-1 = { package = "embedded-hal", version = "1.0" }
 embedded-hal-async = { version = "1.0" }
 embedded-hal-nb = { version = "1.0" }
+embedded-usb-pd = { git = "https://github.com/OpenDevicePartnership/embedded-usb-pd" }
 
 document-features = "0.2.7"
 
@@ -57,6 +58,7 @@ defmt = [
     "embassy-time/defmt",
     "embassy-executor/defmt",
     "embassy-futures/defmt",
+    "embedded-usb-pd/defmt",
 ]
 log = [
     "dep:log",

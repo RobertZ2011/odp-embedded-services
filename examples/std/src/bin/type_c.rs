@@ -3,7 +3,8 @@ use embassy_sync::once_lock::OnceLock;
 use embassy_time::Timer;
 use embedded_services::power;
 use embedded_services::type_c::ucsi::lpm;
-use embedded_services::type_c::{controller, ControllerId, Error, PortId};
+use embedded_services::type_c::{controller, ControllerId, GlobalPortId as PortId};
+use embedded_usb_pd::PdError as Error;
 use log::*;
 use static_cell::StaticCell;
 
