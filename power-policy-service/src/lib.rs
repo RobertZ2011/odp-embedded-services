@@ -1,4 +1,6 @@
 #![no_std]
+use core::ops::DerefMut;
+
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
@@ -68,7 +70,7 @@ impl PowerPolicy {
 
     async fn process_notify_detach(&self, device: &Device) -> Result<(), Error> {
         info!("Device {} received detach", device.id().0);
-        self.select_sink().await?;
+        self.update_current_sink().await?;
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         Ok(())
     }
@@ -84,7 +86,7 @@ impl PowerPolicy {
             capability
         );
 
-        self.select_sink().await?;
+        self.update_current_sink().await?;
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         Ok(())
     }
@@ -105,7 +107,7 @@ impl PowerPolicy {
 
     async fn process_notify_disconnect(&self, device: &Device) -> Result<(), Error> {
         info!("Device {} received disconnect", device.id().0);
-        self.select_sink().await?;
+        self.update_current_sink().await?;
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         Ok(())
     }
@@ -118,23 +120,14 @@ impl PowerPolicy {
             .await;
     }
 
-    /// Determines and connects the best sink
-    async fn select_sink(&self) -> Result<(), Error> {
-        let mut state = self.state.lock().await;
-        info!("Selecting sink, current sink: {:#?}", state.current_sink_state);
+    /// Iterate over all devices to determine what is now the highest-powered sink
+    async fn find_highest_power_sink(&self) -> Result<Option<SinkState>, Error> {
         let mut best_sink = None;
 
         for node in self.context.devices().await {
             let device = node.data::<Device>().ok_or(Error::InvalidDevice)?;
 
-            if let Some(current_sink) = state.current_sink_state {
-                if device.id() == current_sink.device_id && !device.is_sink().await {
-                    // Our sink has disconnected, don't consider this device
-                    info!("Device {}, current sink disconnected", device.id().0);
-                    continue;
-                }
-            }
-
+            // Update the best available sink
             best_sink = match (best_sink, device.sink_capability().await) {
                 // Nothing available
                 (None, None) => None,
@@ -145,7 +138,7 @@ impl PowerPolicy {
                 }),
                 // Existing sink, no new sink
                 (Some(_), None) => best_sink,
-                // Existing sink, new sink
+                // Existing sink, new available sink
                 (Some(best), Some(available)) => {
                     if available > best.power_capability {
                         Some(SinkState {
@@ -159,60 +152,77 @@ impl PowerPolicy {
             };
         }
 
-        info!("Best sink: {:#?}", best_sink);
-        if let Some(best_sink) = best_sink {
-            // See if we need to disconnect the current sink
-            if let Some(current_sink) = state.current_sink_state {
-                if let Ok(sink) = self
-                    .context
-                    .get_device(current_sink.device_id)
-                    .await?
-                    .try_policy_state_machine::<sm::Sink>()
-                    .await
-                {
-                    if best_sink.device_id == current_sink.device_id
-                        && best_sink.power_capability == current_sink.power_capability
-                    {
-                        // If the sink is the same device, capability and is still available, we don't need to do anything
-                        info!("Best sink is the same, not switching");
-                        return Ok(());
-                    }
+        Ok(best_sink)
+    }
 
-                    self.comms_notify(CommsMessage {
-                        data: CommsData::SinkDisconnected(current_sink.device_id),
-                    })
-                    .await;
-                    // Disconnect the current sink
-                    info!("Device {}, disconnecting current sink", current_sink.device_id.0);
-                    sink.disconnect().await?;
-                }
+    /// Connect to a new sink
+    async fn connect_new_sink(&self, state: &mut InternalState, new_sink: SinkState) -> Result<(), Error> {
+        // Handle our current sink
+        if let Some(current_sink) = state.current_sink_state {
+            if new_sink.device_id == current_sink.device_id
+                && new_sink.power_capability == current_sink.power_capability
+            {
+                // If the sink is the same device, capability, and is still available, we don't need to do anything
+                info!("Best sink is the same, not switching");
+                return Ok(());
             }
 
-            info!("Device {}, connecting new sink", best_sink.device_id.0);
-            return match self
+            state.current_sink_state = None;
+            // Disconnect the current sink if needed
+            if let Ok(sink) = self
                 .context
-                .get_device(best_sink.device_id)
+                .get_device(current_sink.device_id)
                 .await?
-                .try_policy_state_machine::<sm::Attached>()
+                .try_policy_state_machine::<sm::Sink>()
                 .await
             {
-                Ok(attached) => {
-                    attached.connect_sink(best_sink.power_capability).await?;
-                    state.current_sink_state = Some(best_sink);
-                    self.comms_notify(CommsMessage {
-                        data: CommsData::SinkConnected(best_sink.device_id, best_sink.power_capability),
-                    })
-                    .await;
-                    Ok(())
-                }
-                Err(e) => {
-                    error!("Error connecting sink: {:#?}", e);
-                    Err(e)
-                }
-            };
+                info!("Device {}, disconnecting current sink", current_sink.device_id.0);
+                sink.disconnect().await?;
+            }
+
+            self.comms_notify(CommsMessage {
+                data: CommsData::SinkDisconnected(current_sink.device_id),
+            })
+            .await;
+        }
+
+        info!("Device {}, connecting new sink", new_sink.device_id.0);
+        if let Ok(attached) = self
+            .context
+            .get_device(new_sink.device_id)
+            .await?
+            .try_policy_state_machine::<sm::Attached>()
+            .await
+        {
+            attached.connect_sink(new_sink.power_capability).await?;
+            state.current_sink_state = Some(new_sink);
+            self.comms_notify(CommsMessage {
+                data: CommsData::SinkConnected(new_sink.device_id, new_sink.power_capability),
+            })
+            .await;
+        } else {
+            // This should never happen due to the state machine compile-time checking
+            error!("Error obtaining device in attached state");
         }
 
         Ok(())
+    }
+
+    /// Determines and connects the best sink
+    async fn update_current_sink(&self) -> Result<(), Error> {
+        let mut guard = self.state.lock().await;
+        let state = guard.deref_mut();
+        info!("Selecting sink, current sink: {:#?}", state.current_sink_state);
+
+        let best_sink = self.find_highest_power_sink().await?;
+        info!("Best sink: {:#?}", best_sink);
+        if best_sink.is_none() {
+            // No new sink available
+            return Ok(());
+        }
+        let best_sink = best_sink.unwrap();
+
+        self.connect_new_sink(state, best_sink).await
     }
 
     pub async fn process_request(&self) -> Result<(), Error> {
