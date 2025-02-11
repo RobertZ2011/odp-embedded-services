@@ -16,29 +16,29 @@ const POWER0: power::policy::DeviceId = power::policy::DeviceId(0);
 mod test_controller {
     use super::*;
 
-    pub struct Controller<'a> {
-        pub controller: controller::Device<'a>,
+    pub struct Controller {
+        pub controller: controller::Device,
         pub power_policy: power::policy::device::Device,
     }
 
-    impl controller::DeviceContainer for Controller<'_> {
+    impl controller::DeviceContainer for Controller {
         fn get_pd_controller_device(&self) -> &controller::Device {
             &self.controller
         }
     }
 
-    impl power::policy::device::DeviceContainer for Controller<'_> {
+    impl power::policy::device::DeviceContainer for Controller {
         fn get_power_policy_device(&self) -> &power::policy::device::Device {
             &self.power_policy
         }
     }
 
-    impl<'a> Controller<'a> {
-        pub fn new(id: ControllerId, power_id: power::policy::DeviceId, ports: &'a [PortId]) -> Self {
-            Self {
-                controller: controller::Device::new(id, ports),
+    impl Controller {
+        pub fn new(id: ControllerId, power_id: power::policy::DeviceId, ports: &[PortId]) -> Result<Self, Error> {
+            Ok(Self {
+                controller: controller::Device::new(id, ports)?,
                 power_policy: power::policy::device::Device::new(power_id),
-            }
+            })
         }
 
         async fn process_controller_command(
@@ -87,7 +87,7 @@ async fn controller_task() {
 
     static PORTS: [PortId; 2] = [PORT0, PORT1];
 
-    let controller = CONTROLLER.get_or_init(|| test_controller::Controller::new(CONTROLLER0, POWER0, &PORTS));
+    let controller = CONTROLLER.get_or_init(|| test_controller::Controller::new(CONTROLLER0, POWER0, &PORTS).unwrap());
     controller::register_controller(controller).await.unwrap();
 
     loop {

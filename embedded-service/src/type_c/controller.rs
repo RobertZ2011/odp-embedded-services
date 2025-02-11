@@ -7,7 +7,7 @@ use embassy_sync::channel::Channel;
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::{with_timeout, Duration};
 use embedded_usb_pd::pdo::{Pdo, Rdo};
-use embedded_usb_pd::PdError;
+use embedded_usb_pd::{PdError, PortId as LocalPortId};
 
 use super::event::PortEventFlags;
 use super::ucsi::lpm;
@@ -75,31 +75,36 @@ pub enum Response {
     Lpm(lpm::Response),
 }
 
+/// Maximum number of controller ports
+pub const MAX_CONTROLLER_PORTS: usize = 2;
+
 /// PD controller
-pub struct Device<'a> {
+pub struct Device {
     node: intrusive_list::Node,
     id: ControllerId,
-    ports: &'a [GlobalPortId],
+    ports: [GlobalPortId; MAX_CONTROLLER_PORTS],
+    num_ports: usize,
     command: Channel<NoopRawMutex, Command, 1>,
     response: Channel<NoopRawMutex, Response, 1>,
 }
 
-impl intrusive_list::NodeContainer for Device<'static> {
+impl intrusive_list::NodeContainer for Device {
     fn get_node(&self) -> &intrusive_list::Node {
         &self.node
     }
 }
 
-impl<'a> Device<'a> {
+impl Device {
     /// Create a new PD controller struct
-    pub fn new(id: ControllerId, ports: &'a [GlobalPortId]) -> Self {
-        Self {
+    pub fn new(id: ControllerId, ports: &[GlobalPortId]) -> Result<Self, PdError> {
+        Ok(Self {
             node: intrusive_list::Node::uninit(),
             id,
-            ports,
+            ports: ports.try_into().map_err(|_| PdError::InvalidParams)?,
+            num_ports: ports.len(),
             command: Channel::new(),
             response: Channel::new(),
-        }
+        })
     }
 
     /// Send a command to this controller
@@ -111,6 +116,15 @@ impl<'a> Device<'a> {
     /// Check if this controller has the given port
     pub fn has_port(&self, port: GlobalPortId) -> bool {
         self.ports.iter().any(|p| *p == port)
+    }
+
+    /// Covert a local port ID to a global port ID
+    pub fn lookup_global_port(&self, port: LocalPortId) -> Result<GlobalPortId, PdError> {
+        if port.0 >= self.num_ports as u8 {
+            return Err(PdError::InvalidParams);
+        }
+
+        Ok(self.ports[port.0 as usize])
     }
 
     /// Wait for a command to be sent to this controller
@@ -128,12 +142,17 @@ impl<'a> Device<'a> {
         let context = CONTEXT.get().await;
         context.port_events.set(context.port_events.get() | events);
     }
+
+    /// Number of ports on this controller
+    pub fn num_ports(&self) -> usize {
+        self.num_ports
+    }
 }
 
 /// Trait for types that contain a controller struct
 pub trait DeviceContainer {
     /// Get the controller struct
-    fn get_pd_controller_device<'a>(&'a self) -> &'a Device<'a>;
+    fn get_pd_controller_device<'a>(&'a self) -> &'a Device;
 }
 
 /// Messages that a PD controller must implement
