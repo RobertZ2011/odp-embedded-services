@@ -1,4 +1,5 @@
 //! Power policy related data structures and messages
+pub mod action;
 pub mod device;
 pub mod policy;
 

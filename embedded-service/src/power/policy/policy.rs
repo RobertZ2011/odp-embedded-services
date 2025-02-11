@@ -5,7 +5,8 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::once_lock::OnceLock;
 
-use super::{device, DeviceId, Error, PowerCapability};
+use super::device::{self};
+use super::{action, DeviceId, Error, PowerCapability};
 use crate::{error, intrusive_list};
 
 /// Number of slots for policy requests
@@ -165,5 +166,13 @@ impl ContextToken {
     /// Provides access to the device list
     pub async fn devices(&self) -> &intrusive_list::IntrusiveList {
         &CONTEXT.get().await.devices
+    }
+
+    /// Try to provide access to the actions available to the policy for the given state and device
+    pub async fn try_policy_action<'a, S: action::Kind>(
+        &'a self,
+        id: DeviceId,
+    ) -> Result<action::Policy<'a, S>, Error> {
+        self.get_device(id).await?.try_policy_action().await
     }
 }

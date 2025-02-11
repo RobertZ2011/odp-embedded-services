@@ -5,8 +5,8 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
 
-use super::{policy, DeviceId, Error, PowerCapability};
-use crate::{info, intrusive_list};
+use super::{action, DeviceId, Error, PowerCapability};
+use crate::intrusive_list;
 
 /// Most basic device states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,7 +25,7 @@ pub enum StateKind {
 /// Current state of the power device
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-enum State {
+pub enum State {
     /// Device is attached, but is not currently sourcing or sinking power
     Attached,
     /// Device is attached and is currently sourcing power
@@ -37,7 +37,8 @@ enum State {
 }
 
 impl State {
-    fn kind(&self) -> StateKind {
+    /// Returns the correpsonding state kind
+    pub fn kind(&self) -> StateKind {
         match self {
             State::Attached => StateKind::Attached,
             State::Source(_) => StateKind::Source,
@@ -145,7 +146,7 @@ impl Device {
     }
 
     /// Returns the current state of the device
-    async fn state(&self) -> State {
+    pub async fn state(&self) -> State {
         self.state.lock().await.state
     }
 
@@ -160,7 +161,7 @@ impl Device {
     }
 
     /// Sends a request to this device and returns a response
-    async fn execute_device_request(&self, request: RequestData) -> Result<ResponseData, Error> {
+    pub(super) async fn execute_device_request(&self, request: RequestData) -> Result<ResponseData, Error> {
         self.request.send(request).await;
         self.response.receive().await
     }
@@ -175,37 +176,37 @@ impl Device {
         self.response.send(response).await;
     }
 
-    async fn set_state(&self, new_state: State) {
+    /// Internal function to set device state
+    pub(super) async fn set_state(&self, new_state: State) {
         let mut lock = self.state.lock().await;
         let state = lock.deref_mut();
         state.state = new_state;
     }
 
-    async fn update_sink_capability(&self, capability: Option<PowerCapability>) {
+    /// Internal function to set sink capability
+    pub(super) async fn update_sink_capability(&self, capability: Option<PowerCapability>) {
         let mut lock = self.state.lock().await;
         let state = lock.deref_mut();
         state.sink_capability = capability;
     }
-    /// Try to provide access to the device-side state machine
-    pub async fn try_device_state_machine<'a, S: state_machine::Kind>(
-        &'a self,
-    ) -> Result<state_machine::Device<'a, S>, Error> {
+
+    /// Try to provide access to the device actions for the given state
+    pub async fn try_device_action<'a, S: action::Kind>(&'a self) -> Result<action::Device<'a, S>, Error> {
         let state = self.state().await.kind();
         if S::kind() != state {
             return Err(Error::InvalidState(S::kind(), state));
         }
-        Ok(state_machine::Device::new(self))
+        Ok(action::Device::new(self))
     }
 
-    /// Try to provide access to the power policy-side state machine
-    pub async fn try_policy_state_machine<'a, S: state_machine::Kind>(
-        &'a self,
-    ) -> Result<state_machine::Policy<'a, S>, Error> {
+    /// Try to provide access to the policy actions for the given state
+    /// Implemented here for lifetime reasons
+    pub(super) async fn try_policy_action<'a, S: action::Kind>(&'a self) -> Result<action::Policy<'a, S>, Error> {
         let state = self.state().await.kind();
         if S::kind() != state {
             return Err(Error::InvalidState(S::kind(), state));
         }
-        Ok(state_machine::Policy::new(self))
+        Ok(action::Policy::new(self))
     }
 }
 
@@ -224,202 +225,5 @@ pub trait DeviceContainer {
 impl DeviceContainer for Device {
     fn get_power_policy_device(&self) -> &Device {
         self
-    }
-}
-
-/// States for compile time enforced state machine
-pub mod state_machine {
-    use super::*;
-
-    /// Trait to provide the kind of a state type
-    pub trait Kind {
-        /// Return the kind of a state type
-        fn kind() -> StateKind;
-    }
-
-    /// State machine for device that is detached
-    pub struct Detached;
-    impl Kind for Detached {
-        fn kind() -> StateKind {
-            StateKind::Detached
-        }
-    }
-
-    /// State machine for device that is attached
-    pub struct Attached;
-    impl Kind for Attached {
-        fn kind() -> StateKind {
-            StateKind::Attached
-        }
-    }
-
-    /// State machine for device that is sourcing power
-    pub struct Source;
-    impl Kind for Source {
-        fn kind() -> StateKind {
-            StateKind::Source
-        }
-    }
-
-    /// State machine for device that is sinking power
-    pub struct Sink;
-    impl Kind for Sink {
-        fn kind() -> StateKind {
-            StateKind::Sink
-        }
-    }
-
-    /// Device state machine control
-    pub struct Device<'a, S: Kind> {
-        device: &'a super::Device,
-        _state: core::marker::PhantomData<S>,
-    }
-
-    impl<'a, S: Kind> Device<'a, S> {
-        /// Create a new state machine
-        pub(super) fn new(device: &'a super::Device) -> Self {
-            Self {
-                device,
-                _state: core::marker::PhantomData,
-            }
-        }
-
-        /// Detach the device
-        pub async fn detach(self) -> Result<Device<'a, Detached>, Error> {
-            info!("Received detach from device {}", self.device.id.0);
-            self.device.set_state(State::Detached).await;
-            self.device.update_sink_capability(None).await;
-            policy::send_request(self.device.id, policy::RequestData::NotifyDetached)
-                .await?
-                .complete_or_err()?;
-            Ok(Device::new(self.device))
-        }
-
-        /// Disconnect this device
-        async fn disconnect_internal(&self) -> Result<(), Error> {
-            info!("Device {} disconnecting", self.device.id.0);
-            self.device.set_state(State::Attached).await;
-            policy::send_request(self.device.id, policy::RequestData::NotifyDisconnect)
-                .await?
-                .complete_or_err()
-        }
-    }
-
-    impl<'a> Device<'a, Detached> {
-        /// Attach the device
-        pub async fn attach(self) -> Result<Device<'a, Attached>, Error> {
-            info!("Received attach from device {}", self.device.id.0);
-            self.device.set_state(State::Attached).await;
-            policy::send_request(self.device.id, policy::RequestData::NotifyAttached)
-                .await?
-                .complete_or_err()?;
-            Ok(Device::new(self.device))
-        }
-    }
-
-    impl<'a> Device<'a, Attached> {
-        /// Notify the power policy service of an updated sink power capability
-        pub async fn notify_sink_power_capability(&self, capability: Option<PowerCapability>) -> Result<(), Error> {
-            info!("Device {} sink capability updated {:#?}", self.device.id.0, capability);
-            self.device.update_sink_capability(capability).await;
-            policy::send_request(self.device.id, policy::RequestData::NotifySinkCapability(capability))
-                .await?
-                .complete_or_err()
-        }
-
-        /// Request the given power from the power policy service
-        pub async fn request_source_power_capability(&self, capability: PowerCapability) -> Result<(), Error> {
-            info!("Request source from device {}, {:#?}", self.device.id.0, capability);
-            policy::send_request(self.device.id, policy::RequestData::RequestSourceCapability(capability))
-                .await?
-                .complete_or_err()
-        }
-    }
-
-    impl<'a> Device<'a, Sink> {
-        /// Disconnect this device
-        pub async fn disconnect(self) -> Result<Device<'a, Attached>, Error> {
-            self.disconnect_internal().await?;
-            Ok(Device::new(self.device))
-        }
-    }
-
-    impl<'a> Device<'a, Source> {
-        /// Disconnect this device
-        pub async fn disconnect(self) -> Result<Device<'a, Attached>, Error> {
-            self.disconnect_internal().await?;
-            Ok(Device::new(self.device))
-        }
-    }
-
-    /// Policy state machine control
-    pub struct Policy<'a, S: Kind> {
-        device: &'a super::Device,
-        _state: core::marker::PhantomData<S>,
-    }
-
-    impl<'a, S: Kind> Policy<'a, S> {
-        /// Create a new state machine
-        pub(super) fn new(device: &'a super::Device) -> Self {
-            Self {
-                device,
-                _state: core::marker::PhantomData,
-            }
-        }
-
-        async fn disconnect_internal(&self) -> Result<(), Error> {
-            info!("Device {} got disconnect request", self.device.id.0);
-            self.device
-                .execute_device_request(RequestData::Disconnect)
-                .await?
-                .complete_or_err()
-        }
-    }
-
-    // The policy can do nothing when no device is attached
-    impl Policy<'_, Detached> {}
-
-    impl<'a> Policy<'a, Attached> {
-        /// Connect this device as a sink
-        pub async fn connect_sink(self, capability: PowerCapability) -> Result<Policy<'a, Sink>, Error> {
-            info!("Device {} connecting sink", self.device.id.0);
-
-            self.device
-                .execute_device_request(RequestData::ConnectSink(capability))
-                .await?
-                .complete_or_err()?;
-
-            self.device.set_state(State::Sink(capability)).await;
-            Ok(Policy::new(self.device))
-        }
-
-        /// Connect this device as a source
-        pub async fn connect_source(self, capability: PowerCapability) -> Result<Policy<'a, Source>, Error> {
-            info!("Device {} connecting source", self.device.id.0);
-
-            self.device
-                .execute_device_request(RequestData::ConnectSource(capability))
-                .await?
-                .complete_or_err()?;
-
-            self.device.set_state(State::Source(capability)).await;
-            Ok(Policy::new(self.device))
-        }
-    }
-
-    impl<'a> Policy<'a, Sink> {
-        /// Disconnect this device
-        pub async fn disconnect(self) -> Result<Policy<'a, Attached>, Error> {
-            self.disconnect_internal().await?;
-            Ok(Policy::new(self.device))
-        }
-    }
-
-    impl<'a> Policy<'a, Source> {
-        /// Disconnect this device
-        pub async fn disconnect(self) -> Result<Policy<'a, Attached>, Error> {
-            self.disconnect_internal().await?;
-            Ok(Policy::new(self.device))
-        }
     }
 }

@@ -4,8 +4,8 @@ use core::ops::DerefMut;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
-use embedded_services::power::policy::device::{state_machine as sm, Device};
-use embedded_services::power::policy::{policy, *};
+use embedded_services::power::policy::device::Device;
+use embedded_services::power::policy::{action, policy, *};
 use embedded_services::{comms, error, info};
 
 /// State of the current sink
@@ -171,9 +171,7 @@ impl PowerPolicy {
             // Disconnect the current sink if needed
             if let Ok(sink) = self
                 .context
-                .get_device(current_sink.device_id)
-                .await?
-                .try_policy_state_machine::<sm::Sink>()
+                .try_policy_action::<action::Sink>(current_sink.device_id)
                 .await
             {
                 info!("Device {}, disconnecting current sink", current_sink.device_id.0);
@@ -189,9 +187,7 @@ impl PowerPolicy {
         info!("Device {}, connecting new sink", new_sink.device_id.0);
         if let Ok(attached) = self
             .context
-            .get_device(new_sink.device_id)
-            .await?
-            .try_policy_state_machine::<sm::Attached>()
+            .try_policy_action::<action::Attached>(new_sink.device_id)
             .await
         {
             attached.connect_sink(new_sink.power_capability).await?;

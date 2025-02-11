@@ -85,14 +85,14 @@ async fn run(spawner: Spawner) {
     let device0 = DEVICE0.get_or_init(|| ExampleDevice::new(policy::DeviceId(0)));
     policy::register_device(device0).await.unwrap();
     spawner.must_spawn(device_task0(device0));
-    let device0 = device0.device.try_device_state_machine().await.unwrap();
+    let device0 = device0.device.try_device_action().await.unwrap();
 
     info!("Creating device 1");
     static DEVICE1: OnceLock<ExampleDevice> = OnceLock::new();
     let device1 = DEVICE1.get_or_init(|| ExampleDevice::new(policy::DeviceId(1)));
     policy::register_device(device1).await.unwrap();
     spawner.must_spawn(device_task1(device1));
-    let device1 = device1.device.try_device_state_machine().await.unwrap();
+    let device1 = device1.device.try_device_action().await.unwrap();
 
     // Plug in device 0, should become current sink
     info!("Connecting device 0");
