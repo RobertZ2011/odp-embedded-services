@@ -1,5 +1,5 @@
 [package]
-name = "power-policy"
+name = "power-policy-service"
 version = "0.1.0"
 edition = "2021"
 description = "HID embedded service implementation"
