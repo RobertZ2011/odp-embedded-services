@@ -288,6 +288,7 @@ pub mod state_machine {
         pub async fn detach(self) -> Result<Device<'a, Detached>, Error> {
             info!("Received detach from device {}", self.device.id.0);
             self.device.set_state(State::Detached).await;
+            self.device.update_sink_capability(None).await;
             policy::send_request(self.device.id, policy::RequestData::NotifyDetached)
                 .await?
                 .complete_or_err()?;
@@ -393,7 +394,7 @@ pub mod state_machine {
         }
 
         /// Connect this device as a source
-        pub async fn connect_source(self, capability: PowerCapability) -> Result<Device<'a, Source>, Error> {
+        pub async fn connect_source(self, capability: PowerCapability) -> Result<Policy<'a, Source>, Error> {
             info!("Device {} connecting source", self.device.id.0);
 
             self.device
@@ -402,7 +403,7 @@ pub mod state_machine {
                 .complete_or_err()?;
 
             self.device.set_state(State::Source(capability)).await;
-            Ok(Device::new(self.device))
+            Ok(Policy::new(self.device))
         }
     }
 
