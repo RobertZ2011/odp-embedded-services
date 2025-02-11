@@ -28,14 +28,14 @@ impl ExampleDevice {
 
     async fn process_request(&self) -> Result<(), policy::Error> {
         match self.device.wait_request().await {
-            device::RequestData::ConnectSink(capability) => {
+            device::RequestData::ConnectConsumer(capability) => {
                 info!(
-                    "Device {} received connect sink at {:#?}",
+                    "Device {} received connect consumer at {:#?}",
                     self.device.id().0,
                     capability
                 );
             }
-            device::RequestData::ConnectSource(capability) => {
+            device::RequestData::ConnectProvider(capability) => {
                 info!(
                     "Device {} received connect source at {:#?}",
                     self.device.id().0,
@@ -94,38 +94,44 @@ async fn run(spawner: Spawner) {
     spawner.must_spawn(device_task1(device1));
     let device1 = device1.device.try_device_action().await.unwrap();
 
-    // Plug in device 0, should become current sink
+    // Plug in device 0, should become current consumer
     info!("Connecting device 0");
     let device0 = device0.attach().await.unwrap();
-    device0.notify_sink_power_capability(Some(LOW_POWER)).await.unwrap();
+    device0.notify_consumer_power_capability(Some(LOW_POWER)).await.unwrap();
 
-    // Plug in device 1, should become current sink
+    // Plug in device 1, should become current consumer
     info!("Connecting device 1");
     let device1 = device1.attach().await.unwrap();
-    device1.notify_sink_power_capability(Some(HIGH_POWER)).await.unwrap();
+    device1
+        .notify_consumer_power_capability(Some(HIGH_POWER))
+        .await
+        .unwrap();
 
-    // Unplug device 0, device 1 should remain current sink
+    // Unplug device 0, device 1 should remain current consumer
     info!("Unpluging device 0");
     let device0 = device0.detach().await.unwrap();
 
-    // Plug in device 0, device 1 should remain current sink
+    // Plug in device 0, device 1 should remain current consumer
     info!("Connecting device 0");
     let device0 = device0.attach().await.unwrap();
-    device0.notify_sink_power_capability(Some(LOW_POWER)).await.unwrap();
+    device0.notify_consumer_power_capability(Some(LOW_POWER)).await.unwrap();
 
-    // Unplug device 1, device 0 should become current sink
+    // Unplug device 1, device 0 should become current consumer
     info!("Unplugging device 1");
     let device1 = device1.detach().await.unwrap();
 
-    // Replug device 1, device 1 becomes current sink
+    // Replug device 1, device 1 becomes current consumer
     info!("Connecting device 1");
     let device1 = device1.attach().await.unwrap();
-    device1.notify_sink_power_capability(Some(HIGH_POWER)).await.unwrap();
+    device1
+        .notify_consumer_power_capability(Some(HIGH_POWER))
+        .await
+        .unwrap();
 
-    // Disable sink device 0, device 1 should remain current sink
-    // Device 0 should not be able to sink after device 1 is unplugged
+    // Disable consumer device 0, device 1 should remain current consumer
+    // Device 0 should not be able to consumer after device 1 is unplugged
     info!("Connecting device 0");
-    device0.notify_sink_power_capability(None).await.unwrap();
+    device0.notify_consumer_power_capability(None).await.unwrap();
     let _device1 = device1.detach().await.unwrap();
 }
 

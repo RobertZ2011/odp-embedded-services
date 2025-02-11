@@ -18,11 +18,11 @@ const POLICY_CHANNEL_SIZE: usize = 1;
 pub enum RequestData {
     /// Notify that a device has attached
     NotifyAttached,
-    /// Notify that available power for sinking has changed
-    NotifySinkCapability(Option<PowerCapability>),
-    /// Request the given amount of power to source
-    RequestSourceCapability(PowerCapability),
-    /// Notify that a device cannot source or sink power anymore
+    /// Notify that available power for consumption has changed
+    NotifyConsumerCapability(Option<PowerCapability>),
+    /// Request the given amount of power to provider
+    RequestProviderCapability(PowerCapability),
+    /// Notify that a device cannot consume or provide power anymore
     NotifyDisconnect,
     /// Notify that a device has detached
     NotifyDetached,

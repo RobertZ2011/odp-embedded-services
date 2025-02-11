@@ -15,23 +15,23 @@ pub enum StateKind {
     /// No device attached
     Detached,
     /// Device is attached
-    Attached,
-    /// Device is sourcing power
-    Source,
-    /// Device is sinking power
-    Sink,
+    Idle,
+    /// Device is actively providing power
+    ConnectedProvider,
+    /// Device is actively consuming power
+    ConnectedConsumer,
 }
 
 /// Current state of the power device
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum State {
-    /// Device is attached, but is not currently sourcing or sinking power
-    Attached,
-    /// Device is attached and is currently sourcing power
-    Source(PowerCapability),
-    /// Device is attached and is currently sinking power
-    Sink(PowerCapability),
+    /// Device is attached, but is not currently providing or consuming power
+    Idle,
+    /// Device is attached and is currently providing power
+    ConnectedProvider(PowerCapability),
+    /// Device is attached and is currently consuming power
+    ConnectedConsumer(PowerCapability),
     /// No device attached
     Detached,
 }
@@ -40,9 +40,9 @@ impl State {
     /// Returns the correpsonding state kind
     pub fn kind(&self) -> StateKind {
         match self {
-            State::Attached => StateKind::Attached,
-            State::Source(_) => StateKind::Source,
-            State::Sink(_) => StateKind::Sink,
+            State::Idle => StateKind::Idle,
+            State::ConnectedProvider(_) => StateKind::ConnectedProvider,
+            State::ConnectedConsumer(_) => StateKind::ConnectedConsumer,
             State::Detached => StateKind::Detached,
         }
     }
@@ -54,19 +54,19 @@ impl State {
 struct InternalState {
     /// Current state of the device
     pub state: State,
-    /// Current sink capability
-    pub sink_capability: Option<PowerCapability>,
+    /// Current consumer capability
+    pub consumer_capability: Option<PowerCapability>,
 }
 
 /// Data for a device request
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum RequestData {
-    /// Start sinking on this port
-    ConnectSink(PowerCapability),
-    /// Start sourcing on this port
-    ConnectSource(PowerCapability),
-    /// Stop sourcing or sinking on this port
+    /// Start consuming on this device
+    ConnectConsumer(PowerCapability),
+    /// Start providinig on this device
+    ConnectProvider(PowerCapability),
+    /// Stop providing or consuming on this device
     Disconnect,
 }
 
@@ -133,7 +133,7 @@ impl Device {
             id,
             state: Mutex::new(InternalState {
                 state: State::Detached,
-                sink_capability: None,
+                consumer_capability: None,
             }),
             request: Channel::new(),
             response: Channel::new(),
@@ -150,14 +150,14 @@ impl Device {
         self.state.lock().await.state
     }
 
-    /// Returns the current sink capability of the device
-    pub async fn sink_capability(&self) -> Option<PowerCapability> {
-        self.state.lock().await.sink_capability
+    /// Returns the current consumer capability of the device
+    pub async fn consumer_capability(&self) -> Option<PowerCapability> {
+        self.state.lock().await.consumer_capability
     }
 
-    /// Returns true if the device is currently sinking power
-    pub async fn is_sink(&self) -> bool {
-        self.state().await.kind() == StateKind::Sink
+    /// Returns true if the device is currently consuming power
+    pub async fn is_consumer(&self) -> bool {
+        self.state().await.kind() == StateKind::ConnectedConsumer
     }
 
     /// Sends a request to this device and returns a response
@@ -183,11 +183,11 @@ impl Device {
         state.state = new_state;
     }
 
-    /// Internal function to set sink capability
-    pub(super) async fn update_sink_capability(&self, capability: Option<PowerCapability>) {
+    /// Internal function to set consumer capability
+    pub(super) async fn update_consumer_capability(&self, capability: Option<PowerCapability>) {
         let mut lock = self.state.lock().await;
         let state = lock.deref_mut();
-        state.sink_capability = capability;
+        state.consumer_capability = capability;
     }
 
     /// Try to provide access to the device actions for the given state

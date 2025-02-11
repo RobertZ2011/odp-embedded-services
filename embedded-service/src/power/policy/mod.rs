@@ -11,10 +11,10 @@ pub use policy::{init, register_device};
 pub enum Error {
     /// The requested device does not exist
     InvalidDevice,
-    /// The source request was denied, contains maximum available power
-    CannotSource(Option<PowerCapability>),
-    /// The sink request was denied, contains maximum available power
-    CannotSink(Option<PowerCapability>),
+    /// The provide request was denied, contains maximum available power
+    CannotProvide(Option<PowerCapability>),
+    /// The consume request was denied, contains maximum available power
+    CannotConsume(Option<PowerCapability>),
     /// The device is not in the correct state (expected, actual)
     InvalidState(device::StateKind, device::StateKind),
     /// Invalid response
@@ -30,7 +30,7 @@ pub enum Error {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct DeviceId(pub u8);
 
-/// Amount of power that a device can source or sink
+/// Amount of power that a device can provider or consume
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct PowerCapability {
@@ -63,10 +63,10 @@ impl Ord for PowerCapability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum CommsData {
-    /// Sink disconnected
-    SinkDisconnected(DeviceId),
-    /// Sink connected
-    SinkConnected(DeviceId, PowerCapability),
+    /// Consumer disconnected
+    ConsumerDisconnected(DeviceId),
+    /// Consumer connected
+    ConsumerConnected(DeviceId, PowerCapability),
 }
 
 /// Message to send with the comms service

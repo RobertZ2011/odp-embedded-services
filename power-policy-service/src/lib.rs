@@ -8,36 +8,36 @@ use embedded_services::power::policy::device::Device;
 use embedded_services::power::policy::{action, policy, *};
 use embedded_services::{comms, error, info};
 
-/// State of the current sink
+/// State of the current consumer
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SinkState {
-    /// The ID of the currently connected sink
+struct ConsumerState {
+    /// The ID of the currently connected consumer
     device_id: DeviceId,
-    /// The power capability of the currently connected sink
+    /// The power capability of the currently connected consumer
     power_capability: PowerCapability,
 }
 
-impl PartialOrd for SinkState {
+impl PartialOrd for ConsumerState {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.power_capability.cmp(&other.power_capability))
     }
 }
 
-impl Ord for SinkState {
+impl Ord for ConsumerState {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.power_capability.cmp(&other.power_capability)
     }
 }
 
 struct InternalState {
-    /// Current sink state, if any
-    current_sink_state: Option<SinkState>,
+    /// Current consumer state, if any
+    current_consumer_state: Option<ConsumerState>,
 }
 
 impl InternalState {
     fn new() -> Self {
         Self {
-            current_sink_state: None,
+            current_consumer_state: None,
         }
     }
 }
@@ -70,34 +70,34 @@ impl PowerPolicy {
 
     async fn process_notify_detach(&self, device: &Device) -> Result<(), Error> {
         info!("Device {} received detach", device.id().0);
-        self.update_current_sink().await?;
+        self.update_current_consumer().await?;
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         Ok(())
     }
 
-    async fn process_notify_sink_power_capability(
+    async fn process_notify_consumer_power_capability(
         &self,
         device: &Device,
         capability: Option<PowerCapability>,
     ) -> Result<(), Error> {
         info!(
-            "Device {} received sink power capability {:#?}",
+            "Device {} received consumer power capability {:#?}",
             device.id().0,
             capability
         );
 
-        self.update_current_sink().await?;
+        self.update_current_consumer().await?;
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         Ok(())
     }
 
-    async fn process_request_source_power_capabilities(
+    async fn process_request_provider_power_capabilities(
         &self,
         device: &Device,
         capability: PowerCapability,
     ) -> Result<(), Error> {
         info!(
-            "Device {} requested source power capability {:#?}",
+            "Device {} requested provider power capability {:#?}",
             device.id().0,
             capability
         );
@@ -107,7 +107,7 @@ impl PowerPolicy {
 
     async fn process_notify_disconnect(&self, device: &Device) -> Result<(), Error> {
         info!("Device {} received disconnect", device.id().0);
-        self.update_current_sink().await?;
+        self.update_current_consumer().await?;
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         Ok(())
     }
@@ -120,105 +120,111 @@ impl PowerPolicy {
             .await;
     }
 
-    /// Iterate over all devices to determine what is now the highest-powered sink
-    async fn find_highest_power_sink(&self) -> Result<Option<SinkState>, Error> {
-        let mut best_sink = None;
+    /// Iterate over all devices to determine what is now the highest-powered consumer
+    async fn find_highest_power_consumer(&self) -> Result<Option<ConsumerState>, Error> {
+        let mut best_consumer = None;
 
         for node in self.context.devices().await {
             let device = node.data::<Device>().ok_or(Error::InvalidDevice)?;
 
-            // Update the best available sink
-            best_sink = match (best_sink, device.sink_capability().await) {
+            // Update the best available consumer
+            best_consumer = match (best_consumer, device.consumer_capability().await) {
                 // Nothing available
                 (None, None) => None,
-                // No existing sink
-                (None, Some(power_capability)) => Some(SinkState {
+                // No existing consumer
+                (None, Some(power_capability)) => Some(ConsumerState {
                     device_id: device.id(),
                     power_capability,
                 }),
-                // Existing sink, no new sink
-                (Some(_), None) => best_sink,
-                // Existing sink, new available sink
+                // Existing consumer, no new consumer
+                (Some(_), None) => best_consumer,
+                // Existing consumer, new available consumer
                 (Some(best), Some(available)) => {
                     if available > best.power_capability {
-                        Some(SinkState {
+                        Some(ConsumerState {
                             device_id: device.id(),
                             power_capability: available,
                         })
                     } else {
-                        best_sink
+                        best_consumer
                     }
                 }
             };
         }
 
-        Ok(best_sink)
+        Ok(best_consumer)
     }
 
-    /// Connect to a new sink
-    async fn connect_new_sink(&self, state: &mut InternalState, new_sink: SinkState) -> Result<(), Error> {
-        // Handle our current sink
-        if let Some(current_sink) = state.current_sink_state {
-            if new_sink.device_id == current_sink.device_id
-                && new_sink.power_capability == current_sink.power_capability
+    /// Connect to a new consumer
+    async fn connect_new_consumer(&self, state: &mut InternalState, new_consumer: ConsumerState) -> Result<(), Error> {
+        // Handle our current consumer
+        if let Some(current_consumer) = state.current_consumer_state {
+            if new_consumer.device_id == current_consumer.device_id
+                && new_consumer.power_capability == current_consumer.power_capability
             {
-                // If the sink is the same device, capability, and is still available, we don't need to do anything
-                info!("Best sink is the same, not switching");
+                // If the consumer is the same device, capability, and is still available, we don't need to do anything
+                info!("Best consumer is the same, not switching");
                 return Ok(());
             }
 
-            state.current_sink_state = None;
-            // Disconnect the current sink if needed
-            if let Ok(sink) = self
+            state.current_consumer_state = None;
+            // Disconnect the current consumer if needed
+            if let Ok(consumer) = self
                 .context
-                .try_policy_action::<action::Sink>(current_sink.device_id)
+                .try_policy_action::<action::ConnectedConsumer>(current_consumer.device_id)
                 .await
             {
-                info!("Device {}, disconnecting current sink", current_sink.device_id.0);
-                sink.disconnect().await?;
+                info!(
+                    "Device {}, disconnecting current consumer",
+                    current_consumer.device_id.0
+                );
+                consumer.disconnect().await?;
             }
 
             self.comms_notify(CommsMessage {
-                data: CommsData::SinkDisconnected(current_sink.device_id),
+                data: CommsData::ConsumerConnected(current_consumer.device_id, new_consumer.power_capability),
             })
             .await;
         }
 
-        info!("Device {}, connecting new sink", new_sink.device_id.0);
-        if let Ok(attached) = self
+        info!("Device {}, connecting new consumer", new_consumer.device_id.0);
+        if let Ok(idle) = self
             .context
-            .try_policy_action::<action::Attached>(new_sink.device_id)
+            .try_policy_action::<action::Idle>(new_consumer.device_id)
             .await
         {
-            attached.connect_sink(new_sink.power_capability).await?;
-            state.current_sink_state = Some(new_sink);
+            idle.connect_consumer(new_consumer.power_capability).await?;
+            state.current_consumer_state = Some(new_consumer);
             self.comms_notify(CommsMessage {
-                data: CommsData::SinkConnected(new_sink.device_id, new_sink.power_capability),
+                data: CommsData::ConsumerConnected(new_consumer.device_id, new_consumer.power_capability),
             })
             .await;
         } else {
             // This should never happen due to the state machine compile-time checking
-            error!("Error obtaining device in attached state");
+            error!("Error obtaining device in idle state");
         }
 
         Ok(())
     }
 
-    /// Determines and connects the best sink
-    async fn update_current_sink(&self) -> Result<(), Error> {
+    /// Determines and connects the best consumer
+    async fn update_current_consumer(&self) -> Result<(), Error> {
         let mut guard = self.state.lock().await;
         let state = guard.deref_mut();
-        info!("Selecting sink, current sink: {:#?}", state.current_sink_state);
+        info!(
+            "Selecting consumer, current consumer: {:#?}",
+            state.current_consumer_state
+        );
 
-        let best_sink = self.find_highest_power_sink().await?;
-        info!("Best sink: {:#?}", best_sink);
-        if best_sink.is_none() {
-            // No new sink available
+        let best_consumer = self.find_highest_power_consumer().await?;
+        info!("Best consumer: {:#?}", best_consumer);
+        if best_consumer.is_none() {
+            // No new consumer available
             return Ok(());
         }
-        let best_sink = best_sink.unwrap();
+        let best_consumer = best_consumer.unwrap();
 
-        self.connect_new_sink(state, best_sink).await
+        self.connect_new_consumer(state, best_consumer).await
     }
 
     pub async fn process_request(&self) -> Result<(), Error> {
@@ -228,11 +234,12 @@ impl PowerPolicy {
         match request.data {
             policy::RequestData::NotifyAttached => self.process_notify_attach(device).await,
             policy::RequestData::NotifyDetached => self.process_notify_detach(device).await,
-            policy::RequestData::NotifySinkCapability(capability) => {
-                self.process_notify_sink_power_capability(device, capability).await
+            policy::RequestData::NotifyConsumerCapability(capability) => {
+                self.process_notify_consumer_power_capability(device, capability).await
             }
-            policy::RequestData::RequestSourceCapability(capability) => {
-                self.process_request_source_power_capabilities(device, capability).await
+            policy::RequestData::RequestProviderCapability(capability) => {
+                self.process_request_provider_power_capabilities(device, capability)
+                    .await
             }
             policy::RequestData::NotifyDisconnect => self.process_notify_disconnect(device).await,
         }

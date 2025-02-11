@@ -22,7 +22,7 @@ impl<'a, S: Kind> Device<'a, S> {
     pub async fn detach(self) -> Result<Device<'a, Detached>, Error> {
         info!("Received detach from device {}", self.device.id().0);
         self.device.set_state(device::State::Detached).await;
-        self.device.update_sink_capability(None).await;
+        self.device.update_consumer_capability(None).await;
         policy::send_request(self.device.id(), policy::RequestData::NotifyDetached)
             .await?
             .complete_or_err()?;
@@ -32,7 +32,7 @@ impl<'a, S: Kind> Device<'a, S> {
     /// Disconnect this device
     async fn disconnect_internal(&self) -> Result<(), Error> {
         info!("Device {} disconnecting", self.device.id().0);
-        self.device.set_state(device::State::Attached).await;
+        self.device.set_state(device::State::Idle).await;
         policy::send_request(self.device.id(), policy::RequestData::NotifyDisconnect)
             .await?
             .complete_or_err()
@@ -41,9 +41,9 @@ impl<'a, S: Kind> Device<'a, S> {
 
 impl<'a> Device<'a, Detached> {
     /// Attach the device
-    pub async fn attach(self) -> Result<Device<'a, Attached>, Error> {
+    pub async fn attach(self) -> Result<Device<'a, Idle>, Error> {
         info!("Received attach from device {}", self.device.id().0);
-        self.device.set_state(device::State::Attached).await;
+        self.device.set_state(device::State::Idle).await;
         policy::send_request(self.device.id(), policy::RequestData::NotifyAttached)
             .await?
             .complete_or_err()?;
@@ -51,43 +51,46 @@ impl<'a> Device<'a, Detached> {
     }
 }
 
-impl<'a> Device<'a, Attached> {
-    /// Notify the power policy service of an updated sink power capability
-    pub async fn notify_sink_power_capability(&self, capability: Option<PowerCapability>) -> Result<(), Error> {
+impl<'a> Device<'a, Idle> {
+    /// Notify the power policy service of an updated consumer power capability
+    pub async fn notify_consumer_power_capability(&self, capability: Option<PowerCapability>) -> Result<(), Error> {
         info!(
-            "Device {} sink capability updated {:#?}",
+            "Device {} consume capability updated {:#?}",
             self.device.id().0,
             capability
         );
-        self.device.update_sink_capability(capability).await;
-        policy::send_request(self.device.id(), policy::RequestData::NotifySinkCapability(capability))
-            .await?
-            .complete_or_err()
+        self.device.update_consumer_capability(capability).await;
+        policy::send_request(
+            self.device.id(),
+            policy::RequestData::NotifyConsumerCapability(capability),
+        )
+        .await?
+        .complete_or_err()
     }
 
     /// Request the given power from the power policy service
-    pub async fn request_source_power_capability(&self, capability: PowerCapability) -> Result<(), Error> {
-        info!("Request source from device {}, {:#?}", self.device.id().0, capability);
+    pub async fn request_provider_power_capability(&self, capability: PowerCapability) -> Result<(), Error> {
+        info!("Request provide from device {}, {:#?}", self.device.id().0, capability);
         policy::send_request(
             self.device.id(),
-            policy::RequestData::RequestSourceCapability(capability),
+            policy::RequestData::RequestProviderCapability(capability),
         )
         .await?
         .complete_or_err()
     }
 }
 
-impl<'a> Device<'a, Sink> {
+impl<'a> Device<'a, ConnectedConsumer> {
     /// Disconnect this device
-    pub async fn disconnect(self) -> Result<Device<'a, Attached>, Error> {
+    pub async fn disconnect(self) -> Result<Device<'a, Idle>, Error> {
         self.disconnect_internal().await?;
         Ok(Device::new(self.device))
     }
 }
 
-impl<'a> Device<'a, Source> {
+impl<'a> Device<'a, ConnectedProvider> {
     /// Disconnect this device
-    pub async fn disconnect(self) -> Result<Device<'a, Attached>, Error> {
+    pub async fn disconnect(self) -> Result<Device<'a, Idle>, Error> {
         self.disconnect_internal().await?;
         Ok(Device::new(self.device))
     }

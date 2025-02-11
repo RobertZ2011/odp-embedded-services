@@ -23,25 +23,25 @@ impl Kind for Detached {
 }
 
 /// State type for an attached device
-pub struct Attached;
-impl Kind for Attached {
+pub struct Idle;
+impl Kind for Idle {
     fn kind() -> StateKind {
-        StateKind::Attached
+        StateKind::Idle
     }
 }
 
-/// State type for a device that is sourcing power
-pub struct Source;
-impl Kind for Source {
+/// State type for a device that is providing power
+pub struct ConnectedProvider;
+impl Kind for ConnectedProvider {
     fn kind() -> StateKind {
-        StateKind::Source
+        StateKind::ConnectedProvider
     }
 }
 
-/// State type for a device that is sinking power
-pub struct Sink;
-impl Kind for Sink {
+/// State type for a device that is consuming power
+pub struct ConnectedConsumer;
+impl Kind for ConnectedConsumer {
     fn kind() -> StateKind {
-        StateKind::Sink
+        StateKind::ConnectedConsumer
     }
 }

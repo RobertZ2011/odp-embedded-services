@@ -29,45 +29,49 @@ impl<'a, S: Kind> Policy<'a, S> {
 // The policy can do nothing when no device is attached
 impl Policy<'_, Detached> {}
 
-impl<'a> Policy<'a, Attached> {
-    /// Connect this device as a sink
-    pub async fn connect_sink(self, capability: PowerCapability) -> Result<Policy<'a, Sink>, Error> {
-        info!("Device {} connecting sink", self.device.id().0);
+impl<'a> Policy<'a, Idle> {
+    /// Connect this device as a consumer
+    pub async fn connect_consumer(self, capability: PowerCapability) -> Result<Policy<'a, ConnectedConsumer>, Error> {
+        info!("Device {} connecting consumer", self.device.id().0);
 
         self.device
-            .execute_device_request(device::RequestData::ConnectSink(capability))
+            .execute_device_request(device::RequestData::ConnectConsumer(capability))
             .await?
             .complete_or_err()?;
 
-        self.device.set_state(device::State::Sink(capability)).await;
+        self.device
+            .set_state(device::State::ConnectedConsumer(capability))
+            .await;
         Ok(Policy::new(self.device))
     }
 
-    /// Connect this device as a source
-    pub async fn connect_source(self, capability: PowerCapability) -> Result<Policy<'a, Source>, Error> {
-        info!("Device {} connecting source", self.device.id().0);
+    /// Connect this device as a provider
+    pub async fn connect_provider(self, capability: PowerCapability) -> Result<Policy<'a, ConnectedProvider>, Error> {
+        info!("Device {} connecting provider", self.device.id().0);
 
         self.device
-            .execute_device_request(device::RequestData::ConnectSource(capability))
+            .execute_device_request(device::RequestData::ConnectProvider(capability))
             .await?
             .complete_or_err()?;
 
-        self.device.set_state(device::State::Source(capability)).await;
+        self.device
+            .set_state(device::State::ConnectedProvider(capability))
+            .await;
         Ok(Policy::new(self.device))
     }
 }
 
-impl<'a> Policy<'a, Sink> {
+impl<'a> Policy<'a, ConnectedConsumer> {
     /// Disconnect this device
-    pub async fn disconnect(self) -> Result<Policy<'a, Attached>, Error> {
+    pub async fn disconnect(self) -> Result<Policy<'a, Idle>, Error> {
         self.disconnect_internal().await?;
         Ok(Policy::new(self.device))
     }
 }
 
-impl<'a> Policy<'a, Source> {
+impl<'a> Policy<'a, ConnectedProvider> {
     /// Disconnect this device
-    pub async fn disconnect(self) -> Result<Policy<'a, Attached>, Error> {
+    pub async fn disconnect(self) -> Result<Policy<'a, Idle>, Error> {
         self.disconnect_internal().await?;
         Ok(Policy::new(self.device))
     }
