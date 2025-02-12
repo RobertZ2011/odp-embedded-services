@@ -62,51 +62,29 @@ impl PowerPolicy {
         })
     }
 
-    async fn process_notify_attach(&self, device: &Device) -> Result<(), Error> {
-        info!("Device {} received attach", device.id().0);
+    async fn process_notify_attach(&self) -> Result<(), Error> {
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         Ok(())
     }
 
-    async fn process_notify_detach(&self, device: &Device) -> Result<(), Error> {
-        info!("Device {} received detach", device.id().0);
+    async fn process_notify_detach(&self) -> Result<(), Error> {
         self.update_current_consumer().await?;
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         Ok(())
     }
 
-    async fn process_notify_consumer_power_capability(
-        &self,
-        device: &Device,
-        capability: Option<PowerCapability>,
-    ) -> Result<(), Error> {
-        info!(
-            "Device {} received consumer power capability {:#?}",
-            device.id().0,
-            capability
-        );
-
+    async fn process_notify_consumer_power_capability(&self) -> Result<(), Error> {
         self.update_current_consumer().await?;
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         Ok(())
     }
 
-    async fn process_request_provider_power_capabilities(
-        &self,
-        device: &Device,
-        capability: PowerCapability,
-    ) -> Result<(), Error> {
-        info!(
-            "Device {} requested provider power capability {:#?}",
-            device.id().0,
-            capability
-        );
+    async fn process_request_provider_power_capabilities(&self) -> Result<(), Error> {
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         Ok(())
     }
 
-    async fn process_notify_disconnect(&self, device: &Device) -> Result<(), Error> {
-        info!("Device {} received disconnect", device.id().0);
+    async fn process_notify_disconnect(&self) -> Result<(), Error> {
         self.update_current_consumer().await?;
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         Ok(())
@@ -200,7 +178,6 @@ impl PowerPolicy {
             })
             .await;
         } else {
-            // This should never happen due to the state machine compile-time checking
             error!("Error obtaining device in idle state");
         }
 
@@ -232,16 +209,34 @@ impl PowerPolicy {
         let device = self.context.get_device(request.id).await?;
 
         match request.data {
-            policy::RequestData::NotifyAttached => self.process_notify_attach(device).await,
-            policy::RequestData::NotifyDetached => self.process_notify_detach(device).await,
+            policy::RequestData::NotifyAttached => {
+                info!("Received notify attached from device {}", device.id().0);
+                self.process_notify_attach().await
+            }
+            policy::RequestData::NotifyDetached => {
+                info!("Received notify detached from device {}", device.id().0);
+                self.process_notify_detach().await
+            }
             policy::RequestData::NotifyConsumerCapability(capability) => {
-                self.process_notify_consumer_power_capability(device, capability).await
+                info!(
+                    "Received notify consumer capability from device {}: {:#?}",
+                    device.id().0,
+                    capability
+                );
+                self.process_notify_consumer_power_capability().await
             }
             policy::RequestData::RequestProviderCapability(capability) => {
-                self.process_request_provider_power_capabilities(device, capability)
-                    .await
+                info!(
+                    "Received request provider capability from device {}: {:#?}",
+                    device.id().0,
+                    capability
+                );
+                self.process_request_provider_power_capabilities().await
             }
-            policy::RequestData::NotifyDisconnect => self.process_notify_disconnect(device).await,
+            policy::RequestData::NotifyDisconnect => {
+                info!("Received notify disconnect from device {}", device.id().0);
+                self.process_notify_disconnect().await
+            }
         }
     }
 }
