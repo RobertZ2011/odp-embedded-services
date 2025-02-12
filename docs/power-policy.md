@@ -1,6 +1,9 @@
 # Power Policy Service
 
-This document provides a high-level overview of the power policy service. This service is focused around a single policy implementation that manages any number of devices. 
+This document provides a high-level overview of the power policy service. Implementations of this service 
+
+## Design
+This service is designed around a single policy implementation that manages any number of devices. The `policy::ContextToken` type can only be created once and is meant to allow the policy implementation access to the `policy::Context` type. The context maintains a list of devices. The `device::Device` struct maintains the state of a particular device and allows the policy implementation and a specific device to communicate. Transitioning a device between states is done through type-stated action structs located in the `action` module. `action::Device` contains types where the device state transition is driven from the device itself (e.g. the driver for an external charger detects an unplug event). While `action::Policy` contains types where the device state transition is driven from the policy (e.g. in response to that unplug event the policy directs another device to start consuming power).
 
 ## Internal Messaging
 
@@ -8,7 +11,7 @@ This document provides a high-level overview of the power policy service. This s
 Each device can be in one of the following states (`device::State`):
 
 * `Detached`: Nothing attached, device cannot provide or consumer power
-* `Attached`: The device is attached, but is not currently providing or consumer power
+* `Idle`: The device is attached, but is not currently providing or consumer power
 * `Consumer(max power)`: The device is currently consuming power
 * `Provider(max power)`: The device is currently providing power
 
@@ -16,12 +19,12 @@ Each device can be in one of the following states (`device::State`):
 stateDiagram-v2
     Detached --> Idle : NotifyAttach
     Idle --> Consumer : ConnectConsumer
-    Idle --> ConnectProvider : ConnectProvider
-    Consumer --> Attached : Disconnect
-    Provider --> Attached : Disconnect
+    Idle --> Provider : ConnectProvider
+    Consumer --> Idle : Disconnect
+    Provider --> Idle : Disconnect
     Consumer --> Detached : NotifyDetach
     Provider --> Detached : NotifyDetach
-    Attached --> Detached : NotifyDetach
+    Idle --> Detached : NotifyDetach
 ```
 ### Policy Messages
 These messages are sent from a device to the power policy.
@@ -51,7 +54,7 @@ Directs the device to start consuming power at the specified power. If successfu
 Directs the device to start providing power at the specified power. If successfull the device will enter the `Provider` state
 
 #### `Disconnect`
-Directs the device to stop providing or consuming and enter the `Attached` state.
+Directs the device to stop providing or consuming and enter the `Idle` state.
 
 ### Comms Messages
 These messages are used to communicate through the comms serivce.
