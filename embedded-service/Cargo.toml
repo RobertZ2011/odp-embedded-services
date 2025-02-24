@@ -48,3 +48,20 @@ embassy-sync = { git = "https://github.com/embassy-rs/embassy", features = [
     "std",
 ] }
 embassy-futures = { git = "https://github.com/embassy-rs/embassy" }
+
+[features]
+default = []
+defmt = [
+    "dep:defmt",
+    "embassy-sync/defmt",
+    "embassy-time/defmt",
+    "embassy-executor/defmt",
+    "embassy-futures/defmt",
+]
+log = [
+    "dep:log",
+    "embassy-sync/log",
+    "embassy-time/log",
+    "embassy-executor/log",
+    "embassy-futures/log",
+]
