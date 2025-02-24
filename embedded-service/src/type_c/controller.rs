@@ -25,11 +25,15 @@ pub struct Contract {
 }
 
 /// Port status
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct PortStatus {
     /// Current power contract
     pub contract: Option<Contract>,
+    /// Connection present
+    pub connection_present: bool,
+    /// Debug connection
+    pub debug_connection: bool,
 }
 
 /// PD controller command-specific data
