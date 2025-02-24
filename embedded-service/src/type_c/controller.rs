@@ -11,8 +11,8 @@ use embedded_usb_pd::{PdError, PortId as LocalPortId};
 use super::event::PortEventFlags;
 use super::ucsi::lpm;
 use super::{ControllerId, GlobalPortId};
+use crate::intrusive_list;
 use crate::power::policy;
-use crate::{intrusive_list, power};
 
 /// Power contract
 #[derive(Copy, Clone, Debug)]
@@ -159,10 +159,11 @@ pub trait DeviceContainer {
     fn get_pd_controller_device<'a>(&'a self) -> &'a Device;
 }
 
-/// Messages that a PD controller must implement
-pub trait MessageInterface: DeviceContainer + power::policy::device::DeviceContainer {}
-
-impl<T: DeviceContainer + power::policy::device::DeviceContainer> MessageInterface for T {}
+impl DeviceContainer for Device {
+    fn get_pd_controller_device<'a>(&'a self) -> &'a Device {
+        self
+    }
+}
 
 /// Internal context for managing PD controllers
 struct Context {
@@ -187,7 +188,7 @@ pub fn init() {
 }
 
 /// Register a PD controller
-pub async fn register_controller(controller: &'static impl MessageInterface) -> Result<(), intrusive_list::Error> {
+pub async fn register_controller(controller: &'static impl DeviceContainer) -> Result<(), intrusive_list::Error> {
     CONTEXT
         .get()
         .await
