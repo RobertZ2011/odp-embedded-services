@@ -1,4 +1,5 @@
 //! Type-C service
+use controller::Contract;
 use embedded_usb_pd::pdo::{sink, source};
 use embedded_usb_pd::type_c;
 
@@ -104,5 +105,26 @@ impl From<type_c::Current> for policy::PowerCapability {
             // Assume lower power for now
             current_ma: current.to_ma(true),
         }
+    }
+}
+
+impl From<Contract> for policy::PowerCapability {
+    fn from(contract: Contract) -> Self {
+        match contract {
+            Contract::Sink(pdo) => pdo,
+            Contract::Source(pdo) => pdo,
+        }
+    }
+}
+
+impl From<sink::Pdo> for Contract {
+    fn from(pdo: sink::Pdo) -> Self {
+        Contract::Sink(policy::PowerCapability::from(pdo))
+    }
+}
+
+impl From<source::Pdo> for Contract {
+    fn from(pdo: source::Pdo) -> Self {
+        Contract::Source(policy::PowerCapability::from(pdo))
     }
 }

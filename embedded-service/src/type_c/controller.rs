@@ -6,22 +6,22 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::{with_timeout, Duration};
-use embedded_usb_pd::pdo::{Pdo, Rdo};
 use embedded_usb_pd::{PdError, PortId as LocalPortId};
 
 use super::event::PortEventFlags;
 use super::ucsi::lpm;
 use super::{ControllerId, GlobalPortId};
+use crate::power::policy;
 use crate::{intrusive_list, power};
 
-/// Active port contract
+/// Power contract
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct Contract {
-    /// Contract PDO
-    pub pod: Pdo,
-    /// Contract RDO
-    pub rdo: Rdo,
+pub enum Contract {
+    /// Contract as sink
+    Sink(policy::PowerCapability),
+    /// Constract as source
+    Source(policy::PowerCapability),
 }
 
 /// Port status
