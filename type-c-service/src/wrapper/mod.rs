@@ -5,7 +5,7 @@ use core::cell::{Cell, RefCell};
 use core::future::Future;
 
 use bitfield::BitMut;
-use embassy_futures::select::{select, select_array, Either};
+use embassy_futures::select::{select3, select_array, Either3};
 use embedded_services::power::policy::device::{RequestData, StateKind};
 use embedded_services::power::policy::{self, action};
 use embedded_services::type_c::controller::{self, Contract, PortStatus};
@@ -13,6 +13,7 @@ use embedded_services::type_c::event::{PortEventFlags, PortEventKind};
 use embedded_services::{error, info, intrusive_list, trace, warn};
 use embedded_usb_pd::{Error, PdError, PortId as LocalPortId};
 
+pub mod pd;
 pub mod power;
 
 /// PD controller trait for use with wrapper struct
@@ -160,12 +161,19 @@ impl<const N: usize, C: Controller> ControllerWrapper<N, C> {
     /// Top-level processing function
     pub async fn process(&self) {
         let mut controller = self.controller.borrow_mut();
-        match select(controller.wait_port_event(), self.wait_power_command()).await {
-            Either::First(r) => match r {
+        match select3(
+            controller.wait_port_event(),
+            self.wait_power_command(),
+            self.pd_controller.wait_command(),
+        )
+        .await
+        {
+            Either3::First(r) => match r {
                 Ok(_) => self.process_event(&mut controller).await,
                 Err(_) => error!("Error waiting for port event"),
             },
-            Either::Second((command, port)) => self.process_power_command(&mut controller, port, command).await,
+            Either3::Second((command, port)) => self.process_power_command(&mut controller, port, command).await,
+            Either3::Third(command) => self.process_pd_command(&mut controller, command).await,
         }
     }
 
