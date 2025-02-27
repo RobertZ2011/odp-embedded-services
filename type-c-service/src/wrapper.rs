@@ -1,7 +1,7 @@
 //! This module contains the `Controller` trait. Any types that implement this trait can be used with the `ControllerWrapper` struct
 //! which provides a bridge between various service messages and the actual controller functions.
 use core::array::from_fn;
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use core::future::Future;
 
 use bitfield::BitMut;
@@ -43,6 +43,7 @@ pub struct ControllerWrapper<const N: usize, C: Controller> {
     /// Power policy devices to interface with power policy service
     power: [policy::device::Device; N],
     controller: RefCell<C>,
+    active_events: [Cell<PortEventKind>; N],
 }
 
 impl<const N: usize, C: Controller> ControllerWrapper<N, C> {
@@ -52,6 +53,7 @@ impl<const N: usize, C: Controller> ControllerWrapper<N, C> {
             pd_controller,
             power,
             controller: RefCell::new(controller),
+            active_events: [const { Cell::new(PortEventKind::NONE) }; N],
         }
     }
 
@@ -176,6 +178,7 @@ impl<const N: usize, C: Controller> ControllerWrapper<N, C> {
             };
 
             if event == PortEventKind::NONE {
+                self.active_events[port].set(PortEventKind::NONE);
                 continue;
             }
 
@@ -206,6 +209,8 @@ impl<const N: usize, C: Controller> ControllerWrapper<N, C> {
             if event.new_power_contract_as_consumer() {
                 self.process_new_consumer_contract(power, &status).await;
             }
+
+            self.active_events[port].set(event);
         }
 
         self.pd_controller.notify_ports(port_events).await;
