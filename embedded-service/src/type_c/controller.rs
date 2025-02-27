@@ -1,12 +1,11 @@
 //! PD controller related code
-use core::cell::Cell;
 use core::future::Future;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use bitfield::BitMut;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::once_lock::OnceLock;
+use embassy_sync::signal::Signal;
 use embassy_time::{with_timeout, Duration};
 use embedded_usb_pd::{Error, PdError, PortId as LocalPortId};
 
@@ -14,7 +13,7 @@ use super::event::{PortEventFlags, PortEventKind};
 use super::ucsi::lpm;
 use super::{ControllerId, GlobalPortId};
 use crate::power::policy;
-use crate::{intrusive_list, IntrusiveNode};
+use crate::{intrusive_list, trace, IntrusiveNode};
 
 /// Power contract
 #[derive(Copy, Clone, Debug)]
@@ -44,6 +43,8 @@ pub struct PortStatus {
 pub enum PortCommandData {
     /// Get port status
     PortStatus,
+    /// Get and clear events
+    ClearEvents,
 }
 
 /// Port-specific commands
@@ -64,6 +65,8 @@ pub enum PortResponseData {
     Complete,
     /// Port status
     PortStatus(PortStatus),
+    /// ClearEvents
+    ClearEvents(PortEventKind),
 }
 
 impl PortResponseData {
@@ -184,8 +187,21 @@ impl<'a> Device<'a> {
     /// Notify that there are pending events on one or more ports
     /// Each bit corresponds to a global port ID
     pub async fn notify_ports(&self, events: PortEventFlags) {
+        trace!("Notify ports: {:#x}", events.0);
+        // Early exit if no events
+        if events.0 == 0 {
+            return;
+        }
+
         let context = CONTEXT.get().await;
-        context.port_events.set(context.port_events.get() | events);
+
+        context
+            .port_events
+            .signal(if let Some(flags) = context.port_events.try_take() {
+                flags | events
+            } else {
+                events
+            });
     }
 
     /// Number of ports on this controller
@@ -232,14 +248,14 @@ pub trait Controller {
 /// Internal context for managing PD controllers
 struct Context {
     controllers: intrusive_list::IntrusiveList,
-    port_events: Cell<PortEventFlags>,
+    port_events: Signal<NoopRawMutex, PortEventFlags>,
 }
 
 impl Context {
     fn new() -> Self {
         Self {
             controllers: intrusive_list::IntrusiveList::new(),
-            port_events: Cell::new(PortEventFlags(0)),
+            port_events: Signal::new(),
         }
     }
 }
@@ -425,18 +441,19 @@ impl ContextToken {
     }
 
     /// Get the current port events
-    pub async fn get_port_events(&self) -> PortEventFlags {
-        CONTEXT.get().await.port_events.get()
+    pub async fn get_unhandled_events(&self) -> PortEventFlags {
+        CONTEXT.get().await.port_events.wait().await
     }
 
-    /// Clear events on a given port
-    pub async fn clear_port_events(&self, port: GlobalPortId) -> Result<(), PdError> {
-        let context = CONTEXT.get().await;
-        let mut events = context.port_events.get();
-        events.set_bit(port.0.into(), false);
-        context.port_events.set(events);
-
-        Ok(())
+    /// Get the unhandled events for the given port
+    pub async fn get_port_event(&self, port: GlobalPortId) -> Result<PortEventKind, PdError> {
+        match self
+            .send_port_command(port, PortCommandData::ClearEvents, DEFAULT_TIMEOUT)
+            .await?
+        {
+            PortResponseData::ClearEvents(event) => Ok(event),
+            _ => Err(PdError::InvalidResponse),
+        }
     }
 
     /// Get the current port status
