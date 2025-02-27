@@ -1,10 +1,10 @@
 //! This module contains the `Controller` trait. Any types that implement this trait can be used with the `ControllerWrapper` struct
 //! which provides a bridge between various service messages and the actual controller functions.
 use core::array::from_fn;
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 
 use bitfield::BitMut;
-use embassy_futures::select::{select, select_array, Either};
+use embassy_futures::select::{Either, select, select_array};
 use embedded_services::power::policy::device::{RequestData, StateKind};
 use embedded_services::power::policy::{self, action};
 use embedded_services::type_c::controller::{self, Contract, Controller, PortStatus};
@@ -20,6 +20,7 @@ pub struct ControllerWrapper<'a, const N: usize, C: Controller> {
     /// Power policy devices to interface with power policy service
     power: [policy::device::Device; N],
     controller: RefCell<C>,
+    active_events: [Cell<PortEventKind>; N],
 }
 
 impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
@@ -29,6 +30,7 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
             pd_controller,
             power,
             controller: RefCell::new(controller),
+            active_events: [const { Cell::new(PortEventKind::NONE) }; N],
         }
     }
 
@@ -153,6 +155,7 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
             };
 
             if event == PortEventKind::NONE {
+                self.active_events[port].set(PortEventKind::NONE);
                 continue;
             }
 
@@ -183,6 +186,8 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
             if event.new_power_contract_as_consumer() {
                 self.process_new_consumer_contract(power, &status).await;
             }
+
+            self.active_events[port].set(event);
         }
 
         self.pd_controller.notify_ports(port_events).await;
