@@ -77,6 +77,12 @@ impl Service {
                 connected: status.connection_present,
             };
 
+            if status.connection_present {
+                debug!("Port{}: Debug accessory connected", port_id.0);
+            } else {
+                debug!("Port{}: Debug accessory disconnected", port_id.0);
+            }
+
             if let Err(_) = self.tp.send(EndpointID::Internal(Internal::Usbc), &msg).await {
                 error!("Failed to send debug accessory message");
             }
