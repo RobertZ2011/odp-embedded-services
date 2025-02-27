@@ -3,8 +3,9 @@ use core::cell::RefCell;
 use bitfield::Bit;
 use embassy_sync::once_lock::OnceLock;
 use embedded_services::{
+    comms::{self, EndpointID, Internal},
     debug, error, info,
-    type_c::{self, controller::PortStatus, GlobalPortId},
+    type_c::{self, comms::DebugAccessoryMessage, controller::PortStatus, GlobalPortId},
 };
 use embedded_usb_pd::PdError as Error;
 
@@ -19,6 +20,8 @@ struct State {
 
 /// Type-C service
 struct Service {
+    /// Comms endpoint
+    tp: comms::Endpoint,
     /// Type-C context token
     context: type_c::controller::ContextToken,
     /// Current state
@@ -29,6 +32,7 @@ impl Service {
     /// Create a new service
     pub fn create() -> Option<Self> {
         Some(Self {
+            tp: comms::Endpoint::uninit(EndpointID::Internal(Internal::Usbc)),
             context: type_c::controller::ContextToken::create()?,
             state: RefCell::new(State::default()),
         })
@@ -65,6 +69,19 @@ impl Service {
         debug!("Port{} Previous status: {:#?}", port_id.0, old_status);
         debug!("Port{} Status: {:#?}", port_id.0, status);
 
+        let connection_changed = status.connection_present != old_status.connection_present;
+        if connection_changed && (status.debug_connection || old_status.debug_connection) {
+            // Notify that a debug connection has connected/disconnected
+            let msg = DebugAccessoryMessage {
+                port: port_id,
+                connected: status.connection_present,
+            };
+
+            if let Err(_) = self.tp.send(EndpointID::Internal(Internal::Usbc), &msg).await {
+                error!("Failed to send debug accessory message");
+            }
+        }
+
         self.set_cached_port_status(port_id, status)?;
 
         Ok(())
@@ -89,6 +106,12 @@ impl Service {
     }
 }
 
+impl comms::MailboxDelegate for Service {
+    fn receive(&self, _message: &comms::Message) {
+        // Currently only need to send messages
+    }
+}
+
 #[embassy_executor::task]
 pub async fn task() {
     info!("Starting type-c task");
@@ -104,6 +127,11 @@ pub async fn task() {
 
     static SERVICE: OnceLock<Service> = OnceLock::new();
     let service = SERVICE.get_or_init(|| service);
+
+    if let Err(_) = comms::register_endpoint(service, &service.tp).await {
+        error!("Failed to register type-c service endpoint");
+        return;
+    }
 
     loop {
         service.process().await;
