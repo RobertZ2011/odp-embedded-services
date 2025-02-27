@@ -78,7 +78,7 @@ impl<const N: usize, C: Controller> ControllerWrapper<N, C> {
     /// Process a power command
     /// Returns no error because this is a top-level function
     pub(super) async fn process_power_command(&self, controller: &mut C, port: LocalPortId, command: RequestData) {
-        trace!("Processing power command: device{} {:#?}", port, command);
+        trace!("Processing power command: device{} {:#?}", port.0, command);
         let power = match self.get_power_device(port) {
             Ok(power) => power,
             Err(_) => {
