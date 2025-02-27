@@ -1,6 +1,7 @@
 use embassy_executor::{Executor, Spawner};
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::Timer;
+use embedded_services::comms;
 use embedded_services::power::{self, policy};
 use embedded_services::type_c::{controller, ControllerId, GlobalPortId};
 use embedded_usb_pd::type_c::Current;
@@ -58,6 +59,17 @@ mod test_controller {
             self.status.set(PortStatus::default());
             self.events.signal(PortEventKind::PLUG_INSERTED_OR_REMOVED);
         }
+
+        /// Simulate a debug accessory source connecting
+        pub fn connect_debug_accessory_source(&self, current: Current) {
+            self.status.set(PortStatus {
+                contract: Some(Contract::Source(current.into())),
+                connection_present: true,
+                debug_connection: true,
+            });
+            self.events
+                .signal(PortEventKind::PLUG_INSERTED_OR_REMOVED | PortEventKind::NEW_POWER_CONTRACT_AS_CONSUMER);
+        }
     }
 
     pub struct Controller<'a> {
@@ -106,6 +118,38 @@ mod test_controller {
     pub type Wrapper<'a> = type_c_service::wrapper::ControllerWrapper<1, Controller<'a>>;
 }
 
+mod debug {
+    use embedded_services::{
+        comms::{self, Endpoint, EndpointID, Internal},
+        info,
+        type_c::comms::DebugAccessoryMessage,
+    };
+
+    pub struct Listener {
+        pub tp: Endpoint,
+    }
+
+    impl Listener {
+        pub fn new() -> Self {
+            Self {
+                tp: Endpoint::uninit(EndpointID::Internal(Internal::Usbc)),
+            }
+        }
+    }
+
+    impl comms::MailboxDelegate for Listener {
+        fn receive(&self, message: &comms::Message) {
+            if let Some(message) = message.data.get::<DebugAccessoryMessage>() {
+                if message.connected {
+                    info!("Port{}: Debug accessory connected", message.port.0);
+                } else {
+                    info!("Port{}: Debug accessory disconnected", message.port.0);
+                }
+            }
+        }
+    }
+}
+
 #[embassy_executor::task]
 async fn controller_task(state: &'static test_controller::ControllerState) {
     static WRAPPER: OnceLock<test_controller::Wrapper> = OnceLock::new();
@@ -132,6 +176,11 @@ async fn task(spawner: Spawner) {
 
     controller::init();
 
+    // Register debug accessory listener
+    static LISTENER: OnceLock<debug::Listener> = OnceLock::new();
+    let listener = LISTENER.get_or_init(debug::Listener::new);
+    comms::register_endpoint(listener, &listener.tp).await.unwrap();
+
     static STATE: OnceLock<test_controller::ControllerState> = OnceLock::new();
     let state = STATE.get_or_init(test_controller::ControllerState::new);
 
@@ -146,6 +195,15 @@ async fn task(spawner: Spawner) {
 
     info!("Simulating disconnection");
     state.disconnect();
+    Timer::after_millis(250).await;
+
+    info!("Simulating debug accessory connection");
+    state.connect_debug_accessory_source(Current::UsbDefault);
+    Timer::after_millis(250).await;
+
+    info!("Simulating debug accessory disconnection");
+    state.disconnect();
+    Timer::after_millis(250).await;
 }
 
 fn main() {
