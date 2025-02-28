@@ -8,7 +8,9 @@ use embedded_services::power::policy::device::Device;
 use embedded_services::power::policy::{action, policy, *};
 use embedded_services::{comms, error, info};
 
+pub mod config;
 pub mod consumer;
+pub mod provider;
 
 struct InternalState {
     /// Current consumer state, if any
@@ -31,15 +33,18 @@ pub struct PowerPolicy {
     state: Mutex<NoopRawMutex, InternalState>,
     /// Comms endpoint
     tp: comms::Endpoint,
+    /// Config
+    config: config::Config,
 }
 
 impl PowerPolicy {
     /// Create a new power policy
-    pub fn create() -> Option<Self> {
+    pub fn create(config: config::Config) -> Option<Self> {
         Some(Self {
             context: policy::ContextToken::create()?,
             state: Mutex::new(InternalState::new()),
             tp: comms::Endpoint::uninit(comms::EndpointID::Internal(comms::Internal::Power)),
+            config,
         })
     }
 
@@ -51,6 +56,7 @@ impl PowerPolicy {
     async fn process_notify_detach(&self) -> Result<(), Error> {
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         self.update_current_consumer().await?;
+        self.update_providers(None).await?;
         Ok(())
     }
 
@@ -60,8 +66,9 @@ impl PowerPolicy {
         Ok(())
     }
 
-    async fn process_request_provider_power_capabilities(&self) -> Result<(), Error> {
+    async fn process_request_provider_power_capabilities(&self, device: DeviceId) -> Result<(), Error> {
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
+        self.update_providers(Some(device)).await?;
         Ok(())
     }
 
@@ -106,7 +113,7 @@ impl PowerPolicy {
                     device.id().0,
                     capability
                 );
-                self.process_request_provider_power_capabilities().await
+                self.process_request_provider_power_capabilities(device.id()).await
             }
             policy::RequestData::NotifyDisconnect => {
                 info!("Received notify disconnect from device {}", device.id().0);
@@ -121,10 +128,11 @@ impl comms::MailboxDelegate for PowerPolicy {
 }
 
 #[embassy_executor::task]
-pub async fn task() {
+pub async fn task(config: config::Config) {
     info!("Starting power policy task");
     static POLICY: OnceLock<PowerPolicy> = OnceLock::new();
-    let policy = POLICY.get_or_init(|| PowerPolicy::create().expect("Power policy singleton already initialized"));
+    let policy =
+        POLICY.get_or_init(|| PowerPolicy::create(config).expect("Power policy singleton already initialized"));
 
     if comms::register_endpoint(policy, &policy.tp).await.is_err() {
         error!("Failed to register power policy endpoint");
