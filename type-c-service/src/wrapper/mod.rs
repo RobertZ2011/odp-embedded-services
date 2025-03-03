@@ -11,10 +11,14 @@ use embedded_services::power::policy::{self, action};
 use embedded_services::type_c::controller::{self, Contract, PortStatus};
 use embedded_services::type_c::event::{PortEventFlags, PortEventKind};
 use embedded_services::{error, info, intrusive_list, trace, warn};
-use embedded_usb_pd::{Error, PdError, PortId as LocalPortId};
+use embedded_usb_pd::PowerRole;
+use embedded_usb_pd::{type_c::Current as TypecCurrent, Error, PdError, PortId as LocalPortId};
 
 pub mod pd;
 pub mod power;
+
+/// Default current to source
+const DEFAULT_SOURCE_CURRENT: TypecCurrent = TypecCurrent::Current1A5;
 
 /// PD controller trait for use with wrapper struct
 pub trait Controller {
@@ -35,6 +39,25 @@ pub trait Controller {
         &mut self,
         port: LocalPortId,
         enable: bool,
+    ) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
+    /// Enable or disable sourcing
+    fn enable_source(
+        &mut self,
+        port: LocalPortId,
+        enable: bool,
+    ) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
+    /// Set source current capability
+    fn set_source_current(
+        &mut self,
+        port: LocalPortId,
+        current: TypecCurrent,
+        signal_event: bool,
+    ) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
+    /// Initiate a power-role swap to the given role
+    fn request_pr_swap(
+        &mut self,
+        port: LocalPortId,
+        role: PowerRole,
     ) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
 }
 
@@ -62,8 +85,19 @@ impl<const N: usize, C: Controller> ControllerWrapper<N, C> {
 
     /// Handle a plug event
     /// None of the event processing functions return errors to allow processing to continue for other ports on a controller
-    async fn process_plug_event(&self, power: &policy::device::Device, status: &PortStatus) {
+    async fn process_plug_event(
+        &self,
+        controller: &mut C,
+        power: &policy::device::Device,
+        port: LocalPortId,
+        status: &PortStatus,
+    ) {
         info!("Plug event");
+
+        if port.0 > N as u8 {
+            error!("Invalid port {}", port.0);
+            return;
+        }
 
         if status.connection_present {
             info!("Plug inserted");
@@ -89,6 +123,19 @@ impl<const N: usize, C: Controller> ControllerWrapper<N, C> {
             }
         } else {
             info!("Plug removed");
+
+            // Reset source enable to default
+            if let Err(_) = controller.enable_source(port, true).await {
+                error!("Error setting source enable to default");
+                return;
+            }
+
+            // Don't signal since we're disconnected and just resetting to our default value
+            if let Err(_) = controller.set_source_current(port, DEFAULT_SOURCE_CURRENT, false).await {
+                error!("Error setting source current to default");
+                return;
+            }
+
             if let Err(e) = power.detach().await {
                 error!("Error detaching power device: {:?}", e);
                 return;
@@ -145,11 +192,16 @@ impl<const N: usize, C: Controller> ControllerWrapper<N, C> {
 
             trace!("Port{} Interrupt: {:#?}", global_port_id.0, event);
             if event.plug_inserted_or_removed() {
-                self.process_plug_event(power, &status).await;
+                self.process_plug_event(controller, power, local_port_id, &status).await;
             }
 
             if event.new_power_contract_as_consumer() {
-                self.process_new_consumer_contract(power, &status).await;
+                self.process_new_consumer_contract(controller, power, local_port_id, &status)
+                    .await;
+            }
+
+            if event.new_power_contract_as_provider() {
+                self.process_new_provider_contract(global_port_id, power, &status).await;
             }
 
             self.active_events[port].set(event);

@@ -59,6 +59,7 @@ impl PowerPolicy {
         };
 
         self.update_provider_capability(target_power).await?;
+        // Attempt to connect the new provider
         if let Some(new_provider) = new_provider {
             if let Ok(action) = self.context.try_policy_action::<action::Idle>(new_provider).await {
                 action.connect_provider(target_power).await?;

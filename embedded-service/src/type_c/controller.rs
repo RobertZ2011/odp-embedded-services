@@ -15,7 +15,7 @@ use crate::power::policy;
 use crate::{intrusive_list, trace, IntrusiveNode};
 
 /// Power contract
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Contract {
     /// Contract as sink
@@ -34,6 +34,8 @@ pub struct PortStatus {
     pub connection_present: bool,
     /// Debug connection
     pub debug_connection: bool,
+    /// Port partner supports dual-power roles
+    pub dual_power: bool,
 }
 
 /// Port-specific command data
@@ -176,6 +178,15 @@ impl Device {
         Ok(self.ports[port.0 as usize])
     }
 
+    /// Convert a global port ID to a local port ID
+    pub fn lookup_local_port(&self, port: GlobalPortId) -> Result<LocalPortId, PdError> {
+        if !self.has_port(port) {
+            return Err(PdError::InvalidParams);
+        }
+
+        Ok(LocalPortId(self.ports.iter().position(|p| *p == port).unwrap() as u8))
+    }
+
     /// Wait for a command to be sent to this controller
     pub async fn wait_command(&self) -> Command {
         self.command.receive().await
@@ -188,14 +199,13 @@ impl Device {
 
     /// Notify of a port event
     pub async fn notify_ports(&self, events: PortEventFlags) {
-        trace!("Notify ports: {:#x}", events.0);
         // Early exit if no events
         if events.0 == 0 {
             return;
         }
 
+        trace!("Notify ports: {:#x}", events.0);
         let context = CONTEXT.get().await;
-
         context
             .port_events
             .signal(if let Some(flags) = context.port_events.try_take() {

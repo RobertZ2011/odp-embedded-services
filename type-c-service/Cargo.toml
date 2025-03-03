@@ -21,7 +21,7 @@ embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
 bitfield = "0.17.0"
 
-tps6699x = { git = "https://github.com/OpenDevicePartnership/tps6699x", features = [
+tps6699x = { path = "https://github.com/OpenDevicePartnership/tps6699x", features = [
     "embassy",
 ] }
 embedded-usb-pd = { git = "https://github.com/OpenDevicePartnership/embedded-usb-pd", default-features = false }

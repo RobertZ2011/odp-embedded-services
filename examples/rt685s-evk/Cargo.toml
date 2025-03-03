@@ -32,6 +32,7 @@ embassy-executor = { git = "https://github.com/embassy-rs/embassy", features = [
     "executor-thread",
     "executor-interrupt",
     "defmt",
+    "task-arena-size-8192",
 ] }
 embassy-futures = { git = "https://github.com/embassy-rs/embassy" }
 embassy-time = { git = "https://github.com/embassy-rs/embassy", features = [
@@ -51,10 +52,7 @@ power-button-service = { path = "../../power-button-service", features = [
 power-policy-service = { path = "../../power-policy-service", features = [
     "defmt",
 ] }
-tps6699x = { git = "https://github.com/OpenDevicePartnership/tps6699x", features = [
-    "defmt",
-    "embassy",
-] }
+tps6699x = { path = "../../../tps6699x", features = ["defmt", "embassy"] }
 type-c-service = { path = "../../type-c-service", features = ["defmt"] }
 
 static_cell = "2.1.0"

@@ -12,10 +12,11 @@ use embassy_imxrt::{bind_interrupts, peripherals};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
-use embassy_time as _;
+use embassy_time::{self as _, Delay};
 use embedded_services::comms;
 use embedded_services::power::policy::DeviceId as PowerId;
 use embedded_services::type_c::{self, ControllerId, GlobalPortId};
+use embedded_usb_pd::asynchronous::controller::PdController;
 use static_cell::StaticCell;
 use tps6699x::asynchronous::embassy as tps6699x;
 use type_c_service::driver::tps6699x::{self as tps6699x_driver, Tps66994Wrapper};
@@ -95,7 +96,12 @@ async fn main(spawner: Spawner) {
     type_c::controller::init();
 
     info!("Spawining power policy task");
-    spawner.must_spawn(power_policy_service::task());
+    spawner.must_spawn(power_policy_service::task(
+        power_policy_service::config::Config::default(),
+    ));
+
+    info!("Spawining type-c service task");
+    spawner.must_spawn(type_c_service::task());
 
     let int_in = Input::new(p.PIO1_7, Pull::Up, Inverter::Disabled);
     static BUS: OnceLock<Mutex<NoopRawMutex, BusMaster<'static>>> = OnceLock::new();
@@ -107,10 +113,14 @@ async fn main(spawner: Spawner) {
 
     static CONTROLLER: StaticCell<Controller<'static>> = StaticCell::new();
     let controller = CONTROLLER.init(Controller::new_tps66994(device, ADDR0).unwrap());
-    let (tps6699x, interrupt) = controller.make_parts();
+    let (mut tps6699x, interrupt) = controller.make_parts();
 
     info!("Spawining interrupt task");
     spawner.must_spawn(interrupt_task(int_in, interrupt));
+
+    info!("Resetting PD controller");
+    let mut delay = Delay;
+    tps6699x.reset(&mut delay).await.unwrap();
 
     info!("Spawining PD controller task");
     static PD_CONTROLLER: OnceLock<Wrapper> = OnceLock::new();

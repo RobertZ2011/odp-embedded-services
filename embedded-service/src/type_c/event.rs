@@ -15,6 +15,8 @@ bitflags! {
         const NONE = 0;
         /// Plug inserted or removed
         const PLUG_INSERTED_OR_REMOVED = (1 << 0);
+        /// New contract as provider
+        const NEW_POWER_CONTRACT_AS_PROVIDER = (1 << 2);
         /// New contract as consumer
         const NEW_POWER_CONTRACT_AS_CONSUMER = (1 << 3);
     }
@@ -24,6 +26,11 @@ impl PortEventKind {
     /// Returns true if a plug was inserted or removed
     pub fn plug_inserted_or_removed(self) -> bool {
         self & Self::PLUG_INSERTED_OR_REMOVED != Self::NONE
+    }
+
+    /// Returns true if a new power contract was established as provider
+    pub fn new_power_contract_as_provider(self) -> bool {
+        self & Self::NEW_POWER_CONTRACT_AS_PROVIDER != Self::NONE
     }
 
     /// Returns true if a new power contract was established as consumer
