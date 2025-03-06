@@ -4,8 +4,10 @@ use super::*;
 
 /// Current system provider power state
 pub enum PowerState {
-    Low,
-    High,
+    /// System is capable of providing high power
+    Unlimited,
+    /// System can only provide limited power
+    Limited,
 }
 
 impl PowerPolicy {
@@ -21,11 +23,11 @@ impl PowerPolicy {
             }
         }
 
-        let request_low_power = num_providers * self.config.provider_low.max_power_mw();
-        if request_low_power > self.config.high_power_threshold_mw {
-            Ok(PowerState::High)
+        let request_low_power = num_providers * self.config.provider_unlimited.max_power_mw();
+        if request_low_power > self.config.limited_power_threshold_mw {
+            Ok(PowerState::Limited)
         } else {
-            Ok(PowerState::Low)
+            Ok(PowerState::Unlimited)
         }
     }
 
@@ -54,8 +56,8 @@ impl PowerPolicy {
     pub(super) async fn update_providers(&self, new_provider: Option<DeviceId>) -> Result<(), Error> {
         trace!("Updating providers");
         let target_power = match self.compute_total_provider_power(new_provider.is_some()).await? {
-            PowerState::Low => self.config.provider_low,
-            PowerState::High => self.config.provider_high,
+            PowerState::Unlimited => self.config.provider_unlimited,
+            PowerState::Limited => self.config.provider_limited,
         };
 
         self.update_provider_capability(target_power).await?;
