@@ -1,3 +1,8 @@
+//! This file implements logic to determine how much power to provide to each connected device.
+//! When total provided power is below [limited_power_threshold_mw](super::Config::limited_power_threshold_mw)
+//! the system is in unlimited power state. In this mode [provider_unlimited](super::Config::provider_unlimited)
+//! is provided to each device. Above this threshold, the system is in limited power state.
+//! In this mode [provider_limited](super::Config::provider_limited) is provided to each device
 use embedded_services::trace;
 
 use super::*;
