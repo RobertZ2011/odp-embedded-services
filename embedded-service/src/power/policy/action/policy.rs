@@ -1,7 +1,7 @@
 //! Policy state machine
 use super::*;
-use crate::info;
 use crate::power::policy::{device, Error, PowerCapability};
+use crate::{error, info};
 
 /// Policy state machine control
 pub struct Policy<'a, S: Kind> {
@@ -49,6 +49,7 @@ impl<'a, S: Kind> Policy<'a, S> {
             .await?
             .complete_or_err()?;
         self.device.set_state(device::State::Idle).await;
+        self.device.exit_recovery().await;
         Ok(())
     }
 
@@ -106,7 +107,15 @@ impl<'a> Policy<'a, ConnectedConsumer> {
 impl<'a> Policy<'a, ConnectedProvider> {
     /// Disconnect this device
     pub async fn disconnect(self) -> Result<Policy<'a, Idle>, Error> {
-        self.disconnect_internal().await?;
+        if let Err(e) = self.disconnect_internal().await {
+            error!(
+                "Error disconnecting device {}: {:?}, entering recovery mode",
+                self.device.id().0,
+                e
+            );
+            self.device.enter_recovery().await;
+            return Err(e);
+        }
         Ok(Policy::new(self.device))
     }
 
