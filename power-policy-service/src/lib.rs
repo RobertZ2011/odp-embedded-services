@@ -1,9 +1,11 @@
 #![no_std]
+use core::cell::RefCell;
 use core::ops::DerefMut;
-
+use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
+use embassy_time::{Duration, Ticker};
 use embedded_services::power::policy::device::Device;
 use embedded_services::power::policy::{action, policy, *};
 use embedded_services::{comms, error, info};
@@ -12,15 +14,21 @@ pub mod config;
 pub mod consumer;
 pub mod provider;
 
+/// How often to attempt to recover provider devices in recovery
+const PROVIDER_RECOVERY_TICKER_DURATION: Duration = const { Duration::from_millis(1000) };
+
 struct InternalState {
     /// Current consumer state, if any
     current_consumer_state: Option<consumer::State>,
+    /// Current provider global state
+    current_provider_state: provider::State,
 }
 
 impl InternalState {
     fn new() -> Self {
         Self {
             current_consumer_state: None,
+            current_provider_state: provider::State::default(),
         }
     }
 }
@@ -35,6 +43,8 @@ pub struct PowerPolicy {
     tp: comms::Endpoint,
     /// Config
     config: config::Config,
+    /// Recovery ticker
+    recovery_ticker: RefCell<Ticker>,
 }
 
 impl PowerPolicy {
@@ -45,6 +55,7 @@ impl PowerPolicy {
             state: Mutex::new(InternalState::new()),
             tp: comms::Endpoint::uninit(comms::EndpointID::Internal(comms::Internal::Power)),
             config,
+            recovery_ticker: RefCell::new(Ticker::every(PROVIDER_RECOVERY_TICKER_DURATION)),
         })
     }
 
@@ -75,7 +86,7 @@ impl PowerPolicy {
     async fn process_notify_disconnect(&self) -> Result<(), Error> {
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         self.update_current_consumer().await?;
-        Ok(())
+        self.update_providers(None).await
     }
 
     /// Send a notification with the comms service
@@ -86,7 +97,7 @@ impl PowerPolicy {
             .await;
     }
 
-    pub async fn process_request(&self) -> Result<(), Error> {
+    async fn process_message(&self) -> Result<(), Error> {
         let request = self.context.wait_request().await;
         let device = self.context.get_device(request.id).await?;
 
@@ -119,6 +130,14 @@ impl PowerPolicy {
                 info!("Received notify disconnect from device {}", device.id().0);
                 self.process_notify_disconnect().await
             }
+        }
+    }
+
+    /// Top-level event loop function
+    pub async fn process_request(&self) -> Result<(), Error> {
+        match select(self.process_message(), self.attempt_provider_recovery()).await {
+            Either::First(result) => result,
+            Either::Second(_) => Ok(()),
         }
     }
 }
