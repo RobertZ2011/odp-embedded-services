@@ -46,8 +46,8 @@ impl PowerPolicy {
             }
         }
 
-        let request_low_power = num_providers * self.config.provider_unlimited.max_power_mw();
-        if request_low_power > self.config.limited_power_threshold_mw {
+        let total_provided_power = num_providers * self.config.provider_unlimited.max_power_mw();
+        if total_provided_power > self.config.limited_power_threshold_mw {
             Ok(PowerState::Limited)
         } else {
             Ok(PowerState::Unlimited)
