@@ -108,11 +108,7 @@ impl<'a> Policy<'a, ConnectedProvider> {
     /// Disconnect this device
     pub async fn disconnect(self) -> Result<Policy<'a, Idle>, Error> {
         if let Err(e) = self.disconnect_internal().await {
-            error!(
-                "Error disconnecting device {}: {:?}, entering recovery mode",
-                self.device.id().0,
-                e
-            );
+            error!("Error disconnecting device {}: {:?}", self.device.id().0, e);
             self.device.enter_recovery().await;
             return Err(e);
         }

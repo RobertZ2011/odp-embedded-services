@@ -171,16 +171,40 @@ async fn run(spawner: Spawner) {
     let device0 = device0.attach().await.unwrap();
     device0.request_provider_power_capability(LOW_POWER).await.unwrap();
     Timer::after_millis(250).await;
-    // First rejected request is connect request
-    // Second rejected request is disconnect request
-    // Third rejected request is recovery disconnect
-    info!("Rejecting next 3 requests");
-    device0_mock.reject_next_requests(3);
+    // Requests we're rejecting:
+    // Connect request
+    // Disconnect request after failing connect request
+    // Request to connect at recovery limit
+    // Disconnect request after failing recovery limit
+    // First recovery disconnect from `attempt_provider_recovery`
+    // Next recovery disconnect completes
+    info!("Rejecting next 5 requests");
+    device0_mock.reject_next_requests(5);
 
     // Attach device 1, device 0 will fail provider connect request and trigger recovery flow
     let device1 = device1.attach().await.unwrap();
     device1.request_provider_power_capability(LOW_POWER).await.unwrap();
-    Timer::after_millis(5000).await;
+
+    // Wait for the recovery flow to start
+    while !device0_mock.device.is_in_recovery().await {
+        info!("Waiting for recovery flow to start");
+        Timer::after_millis(100).await;
+    }
+
+    // Wait for the recovery flow to complete
+    while device0_mock.device.is_in_recovery().await {
+        info!("Waiting for recovery flow to complete");
+        Timer::after_millis(100).await;
+    }
+
+    // Reconnect device 0
+    info!("Reconnecting device 0 as provider");
+    device0.request_provider_power_capability(LOW_POWER).await.unwrap();
+    // Wait for device 0 to reconnect
+    while !device0_mock.device.is_provider().await {
+        info!("Waiting for device 0 to reconnect");
+        Timer::after_millis(1000).await;
+    }
 
     // Disconnect device 1
     info!("Disconnecting device 1");

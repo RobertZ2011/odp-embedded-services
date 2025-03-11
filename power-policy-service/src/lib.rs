@@ -67,7 +67,7 @@ impl PowerPolicy {
     async fn process_notify_detach(&self) -> Result<(), Error> {
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         self.update_current_consumer().await?;
-        self.update_providers(None).await?;
+        self.update_providers(None).await;
         Ok(())
     }
 
@@ -79,14 +79,15 @@ impl PowerPolicy {
 
     async fn process_request_provider_power_capabilities(&self, device: DeviceId) -> Result<(), Error> {
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
-        self.update_providers(Some(device)).await?;
+        self.update_providers(Some(device)).await;
         Ok(())
     }
 
     async fn process_notify_disconnect(&self) -> Result<(), Error> {
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         self.update_current_consumer().await?;
-        self.update_providers(None).await
+        self.update_providers(None).await;
+        Ok(())
     }
 
     /// Send a notification with the comms service
