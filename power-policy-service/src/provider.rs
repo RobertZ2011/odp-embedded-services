@@ -166,13 +166,13 @@ impl PowerPolicy {
         }
     }
 
-    pub(super) async fn attempt_provider_recovery(&self) {
+    /// Wait for the next provider recovery attempt, returns true if we should call `attempt_provider_recovery`
+    pub(super) async fn wait_attempt_provider_recovery(&self) -> bool {
         self.recovery_ticker.borrow_mut().next().await;
-        if self.state.lock().await.current_provider_state.state != PowerState::Recovery {
-            // Not in recovery mode
-            return;
-        }
+        self.state.lock().await.current_provider_state.state == PowerState::Recovery
+    }
 
+    pub(super) async fn attempt_provider_recovery(&self) {
         info!("Attempting provider recovery");
         let mut recovered = true;
         // Attempt to by disconnecting all providers in recovery

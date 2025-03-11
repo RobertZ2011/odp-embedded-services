@@ -98,8 +98,11 @@ impl PowerPolicy {
             .await;
     }
 
-    async fn process_message(&self) -> Result<(), Error> {
-        let request = self.context.wait_request().await;
+    async fn wait_request(&self) -> policy::Request {
+        self.context.wait_request().await
+    }
+
+    async fn process_request(&self, request: policy::Request) -> Result<(), Error> {
         let device = self.context.get_device(request.id).await?;
 
         match request.data {
@@ -135,10 +138,14 @@ impl PowerPolicy {
     }
 
     /// Top-level event loop function
-    pub async fn process_request(&self) -> Result<(), Error> {
-        match select(self.process_message(), self.attempt_provider_recovery()).await {
-            Either::First(result) => result,
-            Either::Second(_) => Ok(()),
+    pub async fn process(&self) -> Result<(), Error> {
+        match select(self.wait_request(), self.wait_attempt_provider_recovery()).await {
+            Either::First(request) => self.process_request(request).await,
+            Either::Second(true) => {
+                self.attempt_provider_recovery().await;
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 }
@@ -160,7 +167,7 @@ pub async fn task(config: config::Config) {
     }
 
     loop {
-        if let Err(e) = policy.process_request().await {
+        if let Err(e) = policy.process().await {
             error!("Error processing request: {:?}", e);
         }
     }
