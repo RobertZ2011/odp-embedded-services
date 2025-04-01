@@ -11,6 +11,8 @@ bitfield! {
     impl Debug;
     /// Plug inserted or removed
     pub u8, plug_inserted_or_removed, set_plug_inserted_or_removed: 0, 0;
+    /// New power contract as provider
+    pub u8, new_power_contract_as_provider, set_new_power_contract_as_provider: 2, 2;
     /// New power contract as consumer
     pub u8, new_power_contract_as_consumer, set_new_power_contract_as_consumer: 3, 3;
 }
@@ -34,6 +36,16 @@ impl PortEventKind {
     /// Sets the plug inserted or removed event
     pub fn set_plug_inserted_or_removed(&mut self, value: bool) {
         self.0.set_plug_inserted_or_removed(value.into());
+    }
+
+    /// Returns true if a new power contract was established as provider
+    pub fn new_power_contract_as_provider(&self) -> bool {
+        self.0.new_power_contract_as_provider() != 0
+    }
+
+    /// Sets the new power contract as provider event
+    pub fn set_new_power_contract_as_provider(&mut self, value: bool) {
+        self.0.set_new_power_contract_as_provider(value.into());
     }
 
     /// Returns true if a new power contract was established as consumer

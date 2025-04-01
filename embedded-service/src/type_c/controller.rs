@@ -35,6 +35,8 @@ pub struct PortStatus {
     pub connection_present: bool,
     /// Debug connection
     pub debug_connection: bool,
+    /// Port partner supports dual-power roles
+    pub dual_power: bool,
 }
 
 /// Port-specific command data
