@@ -16,7 +16,7 @@ use embedded_services::type_c::ControllerId;
 use embedded_services::{debug, info, trace, type_c};
 use embedded_usb_pd::pdo::{sink, source, Common, Rdo};
 use embedded_usb_pd::type_c::Current as TypecCurrent;
-use embedded_usb_pd::{Error, GlobalPortId, PdError, PortId as LocalPortId};
+use embedded_usb_pd::{Error, GlobalPortId, PdError, PortId as LocalPortId, PowerRole};
 use tps6699x::asynchronous::embassy as tps6699x;
 
 use crate::wrapper::ControllerWrapper;
@@ -212,6 +212,53 @@ impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
         debug!("Port{} enable sink path: {}", port.0, enable);
         let mut tps6699x = self.tps6699x.borrow_mut();
         tps6699x.enable_sink_path(port, enable).await
+    }
+
+    #[allow(clippy::await_holding_refcell_ref)]
+    async fn set_sourcing(&mut self, port: LocalPortId, enable: bool) -> Result<(), Error<Self::BusError>> {
+        debug!("Port{} enable source: {}", port.0, enable);
+        let mut tps6699x = self.tps6699x.borrow_mut();
+        tps6699x.enable_source(port, enable).await
+    }
+
+    #[allow(clippy::await_holding_refcell_ref)]
+    async fn set_source_current(
+        &mut self,
+        port: LocalPortId,
+        current: TypecCurrent,
+        signal_event: bool,
+    ) -> Result<(), Error<Self::BusError>> {
+        debug!("Port{} set source current: {:?}", port.0, current);
+
+        let mut tps6699x = self.tps6699x.borrow_mut();
+        let mut port_control = tps6699x.get_port_control(port).await?;
+        port_control.set_typec_current(current.into());
+
+        tps6699x.set_port_control(port, port_control).await?;
+        if signal_event {
+            let mut event = PortEventKind::none();
+            event.set_new_power_contract_as_consumer(true);
+            self.signal_event(port, event);
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::await_holding_refcell_ref)]
+    async fn request_pr_swap(
+        &mut self,
+        port: LocalPortId,
+        role: embedded_usb_pd::PowerRole,
+    ) -> Result<(), Error<Self::BusError>> {
+        debug!("Port{} request PR swap to {:?}", port.0, role);
+
+        let mut tps6699x = self.tps6699x.borrow_mut();
+        let mut control = tps6699x.get_port_control(port).await?;
+        match role {
+            PowerRole::Sink => control.set_initiate_swap_to_sink(true),
+            PowerRole::Source => control.set_initiate_swap_to_source(true),
+        }
+
+        tps6699x.set_port_control(port, control).await
     }
 }
 

@@ -8,7 +8,9 @@ use embassy_sync::once_lock::OnceLock;
 use embassy_sync::signal::Signal;
 use embassy_time::{with_timeout, Duration};
 use embedded_usb_pd::ucsi::lpm;
-use embedded_usb_pd::{Error, GlobalPortId, PdError, PortId as LocalPortId};
+use embedded_usb_pd::{
+    type_c::Current as TypecCurrent, Error, GlobalPortId, PdError, PortId as LocalPortId, PowerRole,
+};
 
 use super::event::{PortEventFlags, PortEventKind};
 use super::ControllerId;
@@ -258,6 +260,25 @@ pub trait Controller {
         &mut self,
         port: LocalPortId,
         enable: bool,
+    ) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
+    /// Enable or disable sourcing
+    fn set_sourcing(
+        &mut self,
+        port: LocalPortId,
+        enable: bool,
+    ) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
+    /// Set source current capability
+    fn set_source_current(
+        &mut self,
+        port: LocalPortId,
+        current: TypecCurrent,
+        signal_event: bool,
+    ) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
+    /// Initiate a power-role swap to the given role
+    fn request_pr_swap(
+        &mut self,
+        port: LocalPortId,
+        role: PowerRole,
     ) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
 }
 
