@@ -37,7 +37,6 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
     }
 
     /// Handle a plug event
-    /// None of the event processing functions return errors to allow processing to continue for other ports on a controller
     async fn process_plug_event(
         &self,
         power: &policy::device::Device,
