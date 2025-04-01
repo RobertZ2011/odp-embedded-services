@@ -39,6 +39,19 @@ pub struct PortStatus {
     pub dual_power: bool,
 }
 
+impl PortStatus {
+    /// Create a new blank port status
+    /// Needed because default() is not const
+    pub const fn new() -> Self {
+        Self {
+            contract: None,
+            connection_present: false,
+            debug_connection: false,
+            dual_power: false,
+        }
+    }
+}
+
 /// Port-specific command data
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
