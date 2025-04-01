@@ -1,5 +1,12 @@
 //! Module contain power-policy related message handling
-use embedded_services::power::policy::device::RequestData;
+use embedded_services::{
+    power::policy::{device::RequestData, PowerCapability},
+    type_c::{
+        POWER_CAPABILITY_5V_1A5, POWER_CAPABILITY_5V_3A0, POWER_CAPABILITY_USB_DEFAULT_USB2,
+        POWER_CAPABILITY_USB_DEFAULT_USB3,
+    },
+};
+use embedded_usb_pd::{GlobalPortId, PowerRole};
 
 use super::*;
 
@@ -15,7 +22,9 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
     /// Handle a new consumer contract
     pub(super) async fn process_new_consumer_contract(
         &self,
+        controller: &mut C,
         power: &policy::device::Device,
+        port: LocalPortId,
         status: &PortStatus,
     ) -> Result<(), Error<C::BusError>> {
         info!("New consumer contract");
@@ -31,6 +40,22 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
         }
 
         let contract = status.contract.unwrap();
+        let capability = PowerCapability::from(contract);
+        if status.dual_power && capability.max_power_mw() <= DUAL_ROLE_CONSUMER_THRESHOLD {
+            // Don't attempt to sink from a dual-role supply if the power capability is low
+            // This is to prevent sinking from a phone or similar device
+            // Do a PR swap to become the source instead
+            info!(
+                "Port{}: Dual-role supply with low power capability, requesting PR swap",
+                port.0
+            );
+            if controller.request_pr_swap(port, PowerRole::Source).await.is_err() {
+                error!("Error requesting PR swap");
+                return PdError::Failed.into();
+            }
+            return Ok(());
+        }
+
         let current_state = power.state().await.kind();
         // Don't update the available consumer contract if we're providing power
         if current_state != StateKind::ConnectedProvider {
@@ -67,6 +92,135 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
         Ok(())
     }
 
+    /// Handle a new provider contract
+    pub(super) async fn process_new_provider_contract(
+        &self,
+        port: GlobalPortId,
+        power: &policy::device::Device,
+        status: &PortStatus,
+    ) -> Result<(), Error<C::BusError>> {
+        if port.0 > N as u8 {
+            return PdError::InvalidPort.into();
+        }
+
+        info!("Processing provider contract");
+        if let Some(contract) = status.contract {
+            if !matches!(contract, Contract::Source(_)) {
+                error!("Not a sink contract");
+                return PdError::InvalidMode.into();
+            }
+        } else {
+            error!("No contract");
+            return PdError::InvalidMode.into();
+        }
+
+        let contract = status.contract.unwrap();
+        let current_state = power.state().await.kind();
+        // Don't attempt to source if we're consuming power
+        if current_state != StateKind::ConnectedConsumer {
+            // Recover if we're not in the correct state
+            if let action::device::AnyState::Detached(state) = power.device_action().await {
+                if let Err(e) = state.attach().await {
+                    error!("Error attaching power device: {:?}", e);
+                    return PdError::Failed.into();
+                }
+            }
+
+            if let Ok(state) = power.try_device_action::<action::Idle>().await {
+                if let Err(e) = state
+                    .request_provider_power_capability(policy::PowerCapability::from(contract))
+                    .await
+                {
+                    error!("Error setting power contract: {:?}", e);
+                    return PdError::Failed.into();
+                }
+            } else if let Ok(state) = power.try_device_action::<action::ConnectedProvider>().await {
+                if let Err(e) = state
+                    .request_provider_power_capability(policy::PowerCapability::from(contract))
+                    .await
+                {
+                    error!("Error setting power contract: {:?}", e);
+                    return PdError::Failed.into();
+                }
+            } else {
+                error!("Power device not in detached state");
+                return PdError::InvalidMode.into();
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle a disconnect command
+    async fn process_disconnect(
+        &self,
+        port: LocalPortId,
+        controller: &mut C,
+        power: &policy::device::Device,
+    ) -> Result<(), Error<C::BusError>> {
+        let state = power.state().await.kind();
+
+        if state == StateKind::ConnectedConsumer {
+            info!("Port{}: Disconnect consumer", port.0);
+            if controller.enable_sink_path(port, false).await.is_err() {
+                error!("Error disabling sink path");
+                power.send_response(Err(policy::Error::Failed)).await;
+                return PdError::Failed.into();
+            }
+        } else if state == StateKind::ConnectedProvider {
+            info!("Port{}: Disconnect provider", port.0);
+            if controller.set_sourcing(port, false).await.is_err() {
+                error!("Error disabling source path");
+                power.send_response(Err(policy::Error::Failed)).await;
+                return PdError::Failed.into();
+            }
+
+            // Don't signal since we're disconnected and just resetting to our default value
+            if controller
+                .set_source_current(port, DEFAULT_SOURCE_CURRENT, false)
+                .await
+                .is_err()
+            {
+                error!("Error setting source current to default");
+                return PdError::Failed.into();
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle a connect consumer command
+    async fn process_connect_provider(
+        &self,
+        port: LocalPortId,
+        capability: PowerCapability,
+        controller: &mut C,
+        power: &policy::device::Device,
+    ) -> Result<(), Error<C::BusError>> {
+        info!("Port{}: Connect provider: {:#?}", port.0, capability);
+        let current = match capability {
+            POWER_CAPABILITY_USB_DEFAULT_USB2 | POWER_CAPABILITY_USB_DEFAULT_USB3 => TypecCurrent::UsbDefault,
+            POWER_CAPABILITY_5V_1A5 => TypecCurrent::Current1A5,
+            POWER_CAPABILITY_5V_3A0 => TypecCurrent::Current3A0,
+            _ => {
+                error!("Invalid power capability");
+                power
+                    .send_response(Err(policy::Error::CannotProvide(Some(capability))))
+                    .await;
+                return PdError::InvalidParams.into();
+            }
+        };
+
+        // Signal since we are supplying a different source current
+        if controller.set_source_current(port, current, true).await.is_err() {
+            error!("Error setting source capability");
+            power.send_response(Err(policy::Error::Failed)).await;
+            return PdError::Failed.into();
+        }
+
+        Ok(())
+    }
+
     /// Wait for a power command
     pub(super) async fn wait_power_command(&self) -> (RequestData, LocalPortId) {
         let futures: [_; N] = from_fn(|i| self.power[i].wait_request());
@@ -97,15 +251,22 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
                     return;
                 }
             }
-            policy::device::RequestData::Disconnect => {
-                info!("Port{}: Disconnect", port.0);
-                if controller.enable_sink_path(port, false).await.is_err() {
-                    error!("Error disabling sink path");
-                    power.send_response(Err(policy::Error::Failed)).await;
+            policy::device::RequestData::ConnectProvider(capability) => {
+                if self
+                    .process_connect_provider(port, capability, controller, power)
+                    .await
+                    .is_err()
+                {
+                    error!("Error processing connect provider");
                     return;
                 }
             }
-            _ => {}
+            policy::device::RequestData::Disconnect => {
+                if self.process_disconnect(port, controller, power).await.is_err() {
+                    error!("Error processing disconnect");
+                    return;
+                }
+            }
         }
 
         power.send_response(Ok(policy::device::ResponseData::Complete)).await;

@@ -9,10 +9,16 @@ use embedded_services::power::policy::{self, action};
 use embedded_services::type_c::controller::{self, Contract, Controller, PortStatus};
 use embedded_services::type_c::event::{PortEventFlags, PortEventKind};
 use embedded_services::{error, info, intrusive_list, trace, warn};
-use embedded_usb_pd::{Error, PdError, PortId as LocalPortId};
+use embedded_usb_pd::{type_c::Current as TypecCurrent, Error, PdError, PortId as LocalPortId};
 
 mod pd;
 mod power;
+
+/// Default current to source
+const DEFAULT_SOURCE_CURRENT: TypecCurrent = TypecCurrent::Current1A5;
+/// Threshold power capability before we'll attempt to sink from a dual-role supply
+/// This ensures we don't try to sink from something like a phone
+const DUAL_ROLE_CONSUMER_THRESHOLD: u32 = 15000;
 
 /// Takes an implementation of the `Controller` trait and wraps it with logic to handle
 /// message passing and power-policy integration.
@@ -39,11 +45,17 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
     /// Handle a plug event
     async fn process_plug_event(
         &self,
+        controller: &mut C,
         power: &policy::device::Device,
+        port: LocalPortId,
         status: &PortStatus,
     ) -> Result<(), Error<C::BusError>> {
-        info!("Plug event");
+        if port.0 > N as u8 {
+            error!("Invalid port {}", port.0);
+            return PdError::InvalidPort.into();
+        }
 
+        info!("Plug event");
         if status.connection_present {
             info!("Plug inserted");
 
@@ -68,6 +80,23 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
             }
         } else {
             info!("Plug removed");
+
+            // Reset source enable to default
+            if controller.set_sourcing(port, true).await.is_err() {
+                error!("Error setting source enable to default");
+                return PdError::Failed.into();
+            }
+
+            // Don't signal since we're disconnected and just resetting to our default value
+            if controller
+                .set_source_current(port, DEFAULT_SOURCE_CURRENT, false)
+                .await
+                .is_err()
+            {
+                error!("Error setting source current to default");
+                return PdError::Failed.into();
+            }
+
             if let Err(e) = power.detach().await {
                 error!("Error detaching power device: {:?}", e);
                 return PdError::Failed.into();
@@ -125,15 +154,33 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
             };
 
             trace!("Port{} Interrupt: {:#?}", global_port_id.0, event);
-            if event.plug_inserted_or_removed() && self.process_plug_event(power, &status).await.is_err() {
+            if event.plug_inserted_or_removed()
+                && self
+                    .process_plug_event(controller, power, local_port_id, &status)
+                    .await
+                    .is_err()
+            {
                 error!("Port{}: Error processing plug event", global_port_id.0);
                 continue;
             }
 
             if event.new_power_contract_as_consumer()
-                && self.process_new_consumer_contract(power, &status).await.is_err()
+                && self
+                    .process_new_consumer_contract(controller, power, local_port_id, &status)
+                    .await
+                    .is_err()
             {
                 error!("Port{}: Error processing new consumer contract", global_port_id.0);
+                continue;
+            }
+
+            if event.new_power_contract_as_provider()
+                && self
+                    .process_new_provider_contract(global_port_id, power, &status)
+                    .await
+                    .is_err()
+            {
+                error!("Port{}: Error processing new provider contract", global_port_id.0);
                 continue;
             }
 
