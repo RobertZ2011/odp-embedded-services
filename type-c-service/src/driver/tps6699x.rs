@@ -5,7 +5,9 @@ use core::iter::zip;
 use ::tps6699x::registers::field_sets::IntEventBus1;
 use ::tps6699x::registers::{PdCcPullUp, PlugMode};
 use ::tps6699x::{TPS66993_NUM_PORTS, TPS66994_NUM_PORTS};
+use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::RawMutex;
+use embassy_sync::signal::Signal;
 use embedded_hal_async::i2c::I2c;
 use embedded_services::power::policy::{self, PowerCapability};
 use embedded_services::type_c::controller::{self, Contract, Controller, PortStatus};
@@ -22,6 +24,7 @@ use crate::wrapper::ControllerWrapper;
 pub struct Tps6699x<'a, const N: usize, M: RawMutex, B: I2c> {
     port_events: [Cell<PortEventKind>; N],
     port_status: [Cell<PortStatus>; N],
+    sw_event: Signal<M, ()>,
     tps6699x: RefCell<tps6699x::Tps6699x<'a, M, B>>,
 }
 
@@ -30,6 +33,7 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
         Self {
             port_events: [const { Cell::new(PortEventKind::none()) }; N],
             port_status: [const { Cell::new(PortStatus::new()) }; N],
+            sw_event: Signal::new(),
             tps6699x: RefCell::new(tps6699x),
         }
     }
@@ -135,6 +139,24 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
         }
         Ok(())
     }
+
+    /// Wait for a software event
+    async fn wait_sw_event(&self) {
+        self.sw_event.wait().await;
+    }
+
+    /// Signal an event on the given port
+    #[allow(dead_code)]
+    fn signal_event(&self, port: LocalPortId, event: PortEventKind) {
+        if port.0 >= self.port_events.len() as u8 {
+            return;
+        }
+
+        let cell = &self.port_events[port.0 as usize];
+        let current = cell.get();
+        cell.set(current.union(event));
+        self.sw_event.signal(());
+    }
 }
 
 impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
@@ -144,7 +166,7 @@ impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
     #[allow(clippy::await_holding_refcell_ref)]
     async fn wait_port_event(&mut self) -> Result<(), Error<Self::BusError>> {
         let mut tps6699x = self.tps6699x.borrow_mut();
-        self.wait_interrupt_event(&mut tps6699x).await?;
+        let _ = select(self.wait_interrupt_event(&mut tps6699x), self.wait_sw_event()).await;
 
         for (i, cell) in self.port_events.iter().enumerate() {
             let port = LocalPortId(i as u8);
