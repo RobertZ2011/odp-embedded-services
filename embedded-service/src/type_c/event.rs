@@ -28,6 +28,12 @@ impl PortEventKind {
         Self(PortEventKindRaw(0))
     }
 
+    /// Returns the union of self and other
+    pub fn union(self, other: PortEventKind) -> PortEventKind {
+        // This spacing is what rustfmt wants
+        PortEventKind(PortEventKindRaw(self.0 .0 | other.0 .0))
+    }
+
     /// Returns true if a plug was inserted or removed
     pub fn plug_inserted_or_removed(self) -> bool {
         self.0.plug_inserted_or_removed() != 0
