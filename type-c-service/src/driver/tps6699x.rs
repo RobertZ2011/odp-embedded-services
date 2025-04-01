@@ -1,4 +1,5 @@
 use core::array::from_fn;
+use core::cell::{Cell, RefCell};
 use core::iter::zip;
 
 use ::tps6699x::registers::field_sets::IntEventBus1;
@@ -19,32 +20,36 @@ use tps6699x::asynchronous::embassy as tps6699x;
 use crate::wrapper::ControllerWrapper;
 
 pub struct Tps6699x<'a, const N: usize, M: RawMutex, B: I2c> {
-    port_events: [PortEventKind; N],
-    port_status: [PortStatus; N],
-    tps6699x: tps6699x::Tps6699x<'a, M, B>,
+    port_events: [Cell<PortEventKind>; N],
+    port_status: [Cell<PortStatus>; N],
+    tps6699x: RefCell<tps6699x::Tps6699x<'a, M, B>>,
 }
 
 impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
     fn new(tps6699x: tps6699x::Tps6699x<'a, M, B>) -> Self {
         Self {
-            port_events: [PortEventKind::none(); N],
-            port_status: [PortStatus::default(); N],
-            tps6699x,
+            port_events: [const { Cell::new(PortEventKind::none()) }; N],
+            port_status: [const { Cell::new(PortStatus::new()) }; N],
+            tps6699x: RefCell::new(tps6699x),
         }
     }
 
     /// Reads and caches the current status of the port, returns any detected events
-    async fn update_port_status(&mut self, port: LocalPortId) -> Result<PortEventKind, Error<B::Error>> {
+    async fn update_port_status(
+        &self,
+        tps6699x: &mut tps6699x::Tps6699x<'a, M, B>,
+        port: LocalPortId,
+    ) -> Result<PortEventKind, Error<B::Error>> {
         #[allow(unused_mut)]
         let mut events = PortEventKind::none();
 
-        let status = self.tps6699x.get_port_status(port).await?;
+        let status = tps6699x.get_port_status(port).await?;
         trace!("Port{} status: {:#?}", port.0, status);
 
-        let pd_status = self.tps6699x.get_pd_status(port).await?;
+        let pd_status = tps6699x.get_pd_status(port).await?;
         trace!("Port{} PD status: {:#?}", port.0, pd_status);
 
-        let port_control = self.tps6699x.get_port_control(port).await?;
+        let port_control = tps6699x.get_port_control(port).await?;
         trace!("Port{} control: {:#?}", port.0, port_control);
 
         let mut port_status = PortStatus::default();
@@ -64,9 +69,9 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
             port_status.debug_connection = status.connection_state() == PlugMode::Debug;
 
             // Determine current contract if any
-            let pdo_raw = self.tps6699x.get_active_pdo_contract(port).await?.active_pdo();
+            let pdo_raw = tps6699x.get_active_pdo_contract(port).await?.active_pdo();
             info!("Raw PDO: {:#X}", pdo_raw);
-            let rdo_raw = self.tps6699x.get_active_rdo_contract(port).await?.active_rdo();
+            let rdo_raw = tps6699x.get_active_rdo_contract(port).await?.active_rdo();
             info!("Raw RDO: {:#X}", rdo_raw);
 
             if pdo_raw != 0 && rdo_raw != 0 {
@@ -102,19 +107,20 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
             }
         }
 
-        self.port_status[port.0 as usize] = port_status;
+        self.port_status[port.0 as usize].set(port_status);
         Ok(events)
     }
 
     /// Wait for an event on any port
-    async fn wait_interrupt_event(&mut self) -> Result<(), Error<B::Error>> {
-        let interrupts = self.tps6699x.wait_interrupt(false, |_, _| true).await;
+    async fn wait_interrupt_event(&self, tps6699x: &mut tps6699x::Tps6699x<'a, M, B>) -> Result<(), Error<B::Error>> {
+        let interrupts = tps6699x.wait_interrupt(false, |_, _| true).await;
 
-        for (interrupt, event) in zip(interrupts.iter(), self.port_events.iter_mut()) {
+        for (interrupt, cell) in zip(interrupts.iter(), self.port_events.iter()) {
             if *interrupt == IntEventBus1::new_zero() {
                 continue;
             }
 
+            let mut event = cell.get();
             if interrupt.plug_event() {
                 debug!("Plug event");
                 event.set_plug_inserted_or_removed(true);
@@ -124,6 +130,8 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
                 debug!("New consumer contract");
                 event.set_new_power_contract_as_consumer(true);
             }
+
+            cell.set(event);
         }
         Ok(())
     }
@@ -133,12 +141,15 @@ impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
     type BusError = B::Error;
 
     /// Wait for an event on any port
+    #[allow(clippy::await_holding_refcell_ref)]
     async fn wait_port_event(&mut self) -> Result<(), Error<Self::BusError>> {
-        self.wait_interrupt_event().await?;
+        let mut tps6699x = self.tps6699x.borrow_mut();
+        self.wait_interrupt_event(&mut tps6699x).await?;
 
-        for i in 0..self.port_events.len() {
+        for (i, cell) in self.port_events.iter().enumerate() {
             let port = LocalPortId(i as u8);
-            let event = self.port_events[i].union(self.update_port_status(port).await?);
+
+            let event = cell.get().union(self.update_port_status(&mut tps6699x, port).await?);
 
             // TODO: We get interrupts for certain status changes that don't currently map to a generic port event
             // Enable this when those get fleshed out
@@ -148,7 +159,7 @@ impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
             }*/
 
             trace!("Port{} event: {:#?}", i, event);
-            self.port_events[i] = event;
+            cell.set(event);
         }
         Ok(())
     }
@@ -159,10 +170,7 @@ impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
             return PdError::InvalidPort.into();
         }
 
-        let event = self.port_events[port.0 as usize];
-        self.port_events[port.0 as usize] = PortEventKind::none();
-
-        Ok(event)
+        Ok(self.port_events[port.0 as usize].replace(PortEventKind::none()))
     }
 
     /// Returns the current status of the port
@@ -174,13 +182,14 @@ impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
             return PdError::InvalidPort.into();
         }
 
-        let status = self.port_status[port.0 as usize];
-        Ok(status)
+        Ok(self.port_status[port.0 as usize].get())
     }
 
+    #[allow(clippy::await_holding_refcell_ref)]
     async fn enable_sink_path(&mut self, port: LocalPortId, enable: bool) -> Result<(), Error<Self::BusError>> {
         debug!("Port{} enable sink path: {}", port.0, enable);
-        self.tps6699x.enable_sink_path(port, enable).await
+        let mut tps6699x = self.tps6699x.borrow_mut();
+        tps6699x.enable_sink_path(port, enable).await
     }
 }
 
