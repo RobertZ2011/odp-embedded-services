@@ -20,6 +20,7 @@ use crate::wrapper::ControllerWrapper;
 
 pub struct Tps6699x<'a, const N: usize, M: RawMutex, B: I2c> {
     port_events: [PortEventKind; N],
+    port_status: [PortStatus; N],
     tps6699x: tps6699x::Tps6699x<'a, M, B>,
 }
 
@@ -27,53 +28,16 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
     fn new(tps6699x: tps6699x::Tps6699x<'a, M, B>) -> Self {
         Self {
             port_events: [PortEventKind::none(); N],
+            port_status: [PortStatus::default(); N],
             tps6699x,
         }
     }
-}
 
-impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
-    type BusError = B::Error;
+    /// Reads and caches the current status of the port, returns any detected events
+    async fn update_port_status(&mut self, port: LocalPortId) -> Result<PortEventKind, Error<B::Error>> {
+        #[allow(unused_mut)]
+        let mut events = PortEventKind::none();
 
-    /// Wait for an event on any port
-    async fn wait_port_event(&mut self) -> Result<(), Error<Self::BusError>> {
-        let interrupts = self.tps6699x.wait_interrupt(false, |_, _| true).await;
-
-        for (interrupt, event) in zip(interrupts.iter(), self.port_events.iter_mut()) {
-            if *interrupt == IntEventBus1::new_zero() {
-                continue;
-            }
-
-            if interrupt.plug_event() {
-                debug!("Plug event");
-                event.set_plug_inserted_or_removed(true);
-            }
-
-            if interrupt.new_consumer_contract() {
-                debug!("New consumer contract");
-                event.set_new_power_contract_as_consumer(true);
-            }
-        }
-        Ok(())
-    }
-
-    /// Returns and clears current events for the given port
-    async fn clear_port_events(&mut self, port: LocalPortId) -> Result<PortEventKind, Error<Self::BusError>> {
-        if port.0 >= self.port_events.len() as u8 {
-            return PdError::InvalidPort.into();
-        }
-
-        let event = self.port_events[port.0 as usize];
-        self.port_events[port.0 as usize] = PortEventKind::none();
-
-        Ok(event)
-    }
-
-    /// Returns the current status of the port
-    async fn get_port_status(
-        &mut self,
-        port: LocalPortId,
-    ) -> Result<type_c::controller::PortStatus, Error<Self::BusError>> {
         let status = self.tps6699x.get_port_status(port).await?;
         trace!("Port{} status: {:#?}", port.0, status);
 
@@ -138,7 +102,80 @@ impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
             }
         }
 
-        Ok(port_status)
+        self.port_status[port.0 as usize] = port_status;
+        Ok(events)
+    }
+
+    /// Wait for an event on any port
+    async fn wait_interrupt_event(&mut self) -> Result<(), Error<B::Error>> {
+        let interrupts = self.tps6699x.wait_interrupt(false, |_, _| true).await;
+
+        for (interrupt, event) in zip(interrupts.iter(), self.port_events.iter_mut()) {
+            if *interrupt == IntEventBus1::new_zero() {
+                continue;
+            }
+
+            if interrupt.plug_event() {
+                debug!("Plug event");
+                event.set_plug_inserted_or_removed(true);
+            }
+
+            if interrupt.new_consumer_contract() {
+                debug!("New consumer contract");
+                event.set_new_power_contract_as_consumer(true);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
+    type BusError = B::Error;
+
+    /// Wait for an event on any port
+    async fn wait_port_event(&mut self) -> Result<(), Error<Self::BusError>> {
+        self.wait_interrupt_event().await?;
+
+        for i in 0..self.port_events.len() {
+            let port = LocalPortId(i as u8);
+            let event = self.port_events[i].union(self.update_port_status(port).await?);
+
+            // TODO: We get interrupts for certain status changes that don't currently map to a generic port event
+            // Enable this when those get fleshed out
+            // Ignore empty events
+            /*if event == PortEventKind::NONE {
+                continue;
+            }*/
+
+            trace!("Port{} event: {:#?}", i, event);
+            self.port_events[i] = event;
+        }
+        Ok(())
+    }
+
+    /// Returns and clears current events for the given port
+    async fn clear_port_events(&mut self, port: LocalPortId) -> Result<PortEventKind, Error<Self::BusError>> {
+        if port.0 >= self.port_events.len() as u8 {
+            return PdError::InvalidPort.into();
+        }
+
+        let event = self.port_events[port.0 as usize];
+        self.port_events[port.0 as usize] = PortEventKind::none();
+
+        Ok(event)
+    }
+
+    /// Returns the current status of the port
+    async fn get_port_status(
+        &mut self,
+        port: LocalPortId,
+    ) -> Result<type_c::controller::PortStatus, Error<Self::BusError>> {
+        if port.0 >= self.port_status.len() as u8 {
+            return PdError::InvalidPort.into();
+        }
+
+        let status = self.port_status[port.0 as usize];
+        Ok(status)
     }
 
     async fn enable_sink_path(&mut self, port: LocalPortId, enable: bool) -> Result<(), Error<Self::BusError>> {
