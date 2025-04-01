@@ -11,7 +11,7 @@ use embedded_services::type_c::controller::{self, Contract, Controller, PortStat
 use embedded_services::type_c::event::PortEventKind;
 use embedded_services::type_c::ControllerId;
 use embedded_services::{debug, info, trace, type_c};
-use embedded_usb_pd::pdo::{sink, source, Rdo};
+use embedded_usb_pd::pdo::{sink, source, Common, Rdo};
 use embedded_usb_pd::type_c::Current as TypecCurrent;
 use embedded_usb_pd::{Error, GlobalPortId, PdError, PortId as LocalPortId};
 use tps6699x::asynchronous::embassy as tps6699x;
@@ -107,19 +107,21 @@ impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
 
             if pdo_raw != 0 && rdo_raw != 0 {
                 // Got a valid explicit contract
-                port_status.contract = Some(if pd_status.is_source() {
+                if pd_status.is_source() {
                     let pdo = source::Pdo::try_from(pdo_raw).map_err(Error::Pd)?;
                     let rdo = Rdo::for_pdo(rdo_raw, pdo);
                     debug!("PDO: {:#?}", pdo);
                     debug!("RDO: {:#?}", rdo);
-                    Contract::from(pdo)
+                    port_status.contract = Some(Contract::from(pdo));
+                    port_status.dual_power = pdo.is_dual_role();
                 } else {
                     let pdo = sink::Pdo::try_from(pdo_raw).map_err(Error::Pd)?;
                     let rdo = Rdo::for_pdo(rdo_raw, pdo);
                     debug!("PDO: {:#?}", pdo);
                     debug!("RDO: {:#?}", rdo);
-                    Contract::from(pdo)
-                });
+                    port_status.contract = Some(Contract::from(pdo));
+                    port_status.dual_power = pdo.is_dual_role()
+                }
             } else if pd_status.is_source() {
                 let current = TypecCurrent::try_from(port_control.typec_current()).map_err(Error::Pd)?;
                 debug!("Port{} type-C source current: {:#?}", port.0, current);
