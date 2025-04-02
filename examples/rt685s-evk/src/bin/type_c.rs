@@ -99,11 +99,13 @@ mod debug {
     }
 
     impl comms::MailboxDelegate for Device {
-        fn receive(&self, message: &comms::Message) {
+        fn receive(&self, message: &comms::Message) -> Result<(), comms::MailboxDelegateError> {
             trace!("Got message");
             if let Some(message) = message.data.get::<type_c::comms::DebugAccessoryMessage>() {
                 info!("Debug accessory message: {:?}", message);
             }
+
+            Ok(())
         }
     }
 }
