@@ -32,7 +32,7 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
     }
 }
 
-impl<'a, const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'a, N, M, B> {
+impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
     type BusError = B::Error;
 
     /// Wait for an event on any port
@@ -86,10 +86,10 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'a, N, M, 
         let mut port_status = PortStatus::default();
 
         let plug_present = status.plug_present();
-        let valid_connection = match status.connection_state() {
-            PlugMode::Audio | PlugMode::Debug | PlugMode::ConnectedNoRa | PlugMode::Connected => true,
-            _ => false,
-        };
+        let valid_connection = matches!(
+            status.connection_state(),
+            PlugMode::Audio | PlugMode::Debug | PlugMode::ConnectedNoRa | PlugMode::Connected
+        );
 
         debug!("Port{} Plug present: {}", port.0, plug_present);
         debug!("Port{} Valid connection: {}", port.0, valid_connection);
@@ -120,20 +120,18 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'a, N, M, 
                     debug!("RDO: {:#?}", rdo);
                     Contract::from(pdo)
                 });
+            } else if pd_status.is_source() {
+                let current = TypecCurrent::try_from(port_control.typec_current()).map_err(Error::Pd)?;
+                debug!("Port{} type-C source current: {:#?}", port.0, current);
+                port_status.contract = Some(Contract::Source(PowerCapability::from(current)))
             } else {
-                if pd_status.is_source() {
-                    let current = TypecCurrent::try_from(port_control.typec_current()).map_err(Error::Pd)?;
-                    debug!("Port{} type-C source current: {:#?}", port.0, current);
-                    port_status.contract = Some(Contract::Source(PowerCapability::from(current)))
+                let pull = pd_status.cc_pull_up();
+                if pull == PdCcPullUp::NoPull {
+                    port_status.contract = None
                 } else {
-                    let pull = pd_status.cc_pull_up();
-                    if pull == PdCcPullUp::NoPull {
-                        port_status.contract = None
-                    } else {
-                        let current = TypecCurrent::try_from(pd_status.cc_pull_up()).map_err(Error::Pd)?;
-                        debug!("Port{} type-C sink current: {:#?}", port.0, current);
-                        port_status.contract = Some(Contract::Sink(PowerCapability::from(current)))
-                    }
+                    let current = TypecCurrent::try_from(pd_status.cc_pull_up()).map_err(Error::Pd)?;
+                    debug!("Port{} type-C sink current: {:#?}", port.0, current);
+                    port_status.contract = Some(Contract::Sink(PowerCapability::from(current)))
                 }
             }
         }
