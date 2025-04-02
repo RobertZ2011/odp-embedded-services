@@ -18,7 +18,7 @@ use crate::power::policy;
 use crate::{intrusive_list, trace, IntrusiveNode};
 
 /// Power contract
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Contract {
     /// Contract as sink
