@@ -96,18 +96,38 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
                     port_status.dual_power = pdo.is_dual_role()
                 }
             } else if pd_status.is_source() {
+                // Implicit source contract
                 let current = TypecCurrent::try_from(port_control.typec_current()).map_err(Error::Pd)?;
                 debug!("Port{} type-C source current: {:#?}", port.0, current);
-                port_status.contract = Some(Contract::Source(PowerCapability::from(current)))
+                let new_contract = Some(Contract::Source(PowerCapability::from(current)));
+
+                if new_contract != port_status.contract {
+                    debug!("New implicit contract as provider");
+                    // We don't get interrupts for implicit contracts so generate event manually
+                    events.set_new_power_contract_as_provider(true);
+                }
+
+                port_status.contract = new_contract;
             } else {
+                // Implicit sink contract
                 let pull = pd_status.cc_pull_up();
-                if pull == PdCcPullUp::NoPull {
-                    port_status.contract = None
+                let new_contract = if pull == PdCcPullUp::NoPull {
+                    // No pull up means no contract
+                    debug!("Port{} no pull up", port.0);
+                    None
                 } else {
                     let current = TypecCurrent::try_from(pd_status.cc_pull_up()).map_err(Error::Pd)?;
                     debug!("Port{} type-C sink current: {:#?}", port.0, current);
-                    port_status.contract = Some(Contract::Sink(PowerCapability::from(current)))
+                    Some(Contract::Sink(PowerCapability::from(current)))
+                };
+
+                if new_contract.is_some() && new_contract != port_status.contract {
+                    debug!("New implicit contract as consumer");
+                    // We don't get interrupts for implicit contracts so generate event manually
+                    events.set_new_power_contract_as_consumer(true);
                 }
+
+                port_status.contract = new_contract;
             }
         }
 
@@ -133,6 +153,11 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
             if interrupt.new_consumer_contract() {
                 debug!("New consumer contract");
                 event.set_new_power_contract_as_consumer(true);
+            }
+
+            if interrupt.new_provider_contract() {
+                debug!("New consumer contract");
+                event.set_new_power_contract_as_provider(true);
             }
 
             cell.set(event);
