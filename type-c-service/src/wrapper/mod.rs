@@ -6,7 +6,7 @@ use core::cell::{Cell, RefCell};
 use embassy_futures::select::{select3, select_array, Either3};
 use embedded_services::power::policy::device::StateKind;
 use embedded_services::power::policy::{self, action};
-use embedded_services::type_c::controller::{self, Contract, Controller, PortStatus};
+use embedded_services::type_c::controller::{self, Controller, PortStatus};
 use embedded_services::type_c::event::{PortEventFlags, PortEventKind};
 use embedded_services::{error, info, intrusive_list, trace, warn};
 use embedded_usb_pd::{type_c::Current as TypecCurrent, Error, PdError, PortId as LocalPortId};

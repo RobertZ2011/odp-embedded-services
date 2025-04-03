@@ -28,11 +28,13 @@ pub enum Contract {
 }
 
 /// Port status
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct PortStatus {
-    /// Current power contract
-    pub contract: Option<Contract>,
+    /// Current available source contract
+    pub available_source_contract: Option<policy::PowerCapability>,
+    /// Current available sink contract
+    pub available_sink_contract: Option<policy::PowerCapability>,
     /// Connection present
     pub connection_present: bool,
     /// Debug connection
@@ -46,11 +48,18 @@ impl PortStatus {
     /// Needed because default() is not const
     pub const fn new() -> Self {
         Self {
-            contract: None,
+            available_source_contract: None,
+            available_sink_contract: None,
             connection_present: false,
             debug_connection: false,
             dual_power: false,
         }
+    }
+}
+
+impl Default for PortStatus {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

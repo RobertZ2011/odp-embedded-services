@@ -29,31 +29,21 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
     ) -> Result<(), Error<C::BusError>> {
         info!("New consumer contract");
 
-        if let Some(contract) = status.contract {
-            if !matches!(contract, Contract::Sink(_)) {
-                error!("Not a sink contract");
-                return PdError::InvalidMode.into();
+        if let Some(capability) = status.available_sink_contract {
+            if status.dual_power && capability.max_power_mw() <= DUAL_ROLE_CONSUMER_THRESHOLD {
+                // Don't attempt to sink from a dual-role supply if the power capability is low
+                // This is to prevent sinking from a phone or similar device
+                // Do a PR swap to become the source instead
+                info!(
+                    "Port{}: Dual-role supply with low power capability, requesting PR swap",
+                    port.0
+                );
+                if controller.request_pr_swap(port, PowerRole::Source).await.is_err() {
+                    error!("Error requesting PR swap");
+                    return PdError::Failed.into();
+                }
+                return Ok(());
             }
-        } else {
-            error!("No contract");
-            return PdError::InvalidMode.into();
-        }
-
-        let contract = status.contract.unwrap();
-        let capability = PowerCapability::from(contract);
-        if status.dual_power && capability.max_power_mw() <= DUAL_ROLE_CONSUMER_THRESHOLD {
-            // Don't attempt to sink from a dual-role supply if the power capability is low
-            // This is to prevent sinking from a phone or similar device
-            // Do a PR swap to become the source instead
-            info!(
-                "Port{}: Dual-role supply with low power capability, requesting PR swap",
-                port.0
-            );
-            if controller.request_pr_swap(port, PowerRole::Source).await.is_err() {
-                error!("Error requesting PR swap");
-                return PdError::Failed.into();
-            }
-            return Ok(());
         }
 
         let current_state = power.state().await.kind();
@@ -69,7 +59,7 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
 
             if let Ok(state) = power.try_device_action::<action::Idle>().await {
                 if let Err(e) = state
-                    .notify_consumer_power_capability(Some(policy::PowerCapability::from(contract)))
+                    .notify_consumer_power_capability(status.available_sink_contract)
                     .await
                 {
                     error!("Error setting power contract: {:?}", e);
@@ -77,7 +67,7 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
                 }
             } else if let Ok(state) = power.try_device_action::<action::ConnectedConsumer>().await {
                 if let Err(e) = state
-                    .notify_consumer_power_capability(Some(policy::PowerCapability::from(contract)))
+                    .notify_consumer_power_capability(status.available_sink_contract)
                     .await
                 {
                     error!("Error setting power contract: {:?}", e);
@@ -103,18 +93,6 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
             return PdError::InvalidPort.into();
         }
 
-        info!("Processing provider contract");
-        if let Some(contract) = status.contract {
-            if !matches!(contract, Contract::Source(_)) {
-                error!("Not a sink contract");
-                return PdError::InvalidMode.into();
-            }
-        } else {
-            error!("No contract");
-            return PdError::InvalidMode.into();
-        }
-
-        let contract = status.contract.unwrap();
         let current_state = power.state().await.kind();
         // Don't attempt to source if we're consuming power
         if current_state != StateKind::ConnectedConsumer {
@@ -127,20 +105,24 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
             }
 
             if let Ok(state) = power.try_device_action::<action::Idle>().await {
-                if let Err(e) = state
-                    .request_provider_power_capability(policy::PowerCapability::from(contract))
-                    .await
-                {
-                    error!("Error setting power contract: {:?}", e);
-                    return PdError::Failed.into();
+                if let Some(contract) = status.available_source_contract {
+                    if let Err(e) = state.request_provider_power_capability(contract).await {
+                        error!("Error setting power contract: {:?}", e);
+                        return PdError::Failed.into();
+                    }
                 }
             } else if let Ok(state) = power.try_device_action::<action::ConnectedProvider>().await {
-                if let Err(e) = state
-                    .request_provider_power_capability(policy::PowerCapability::from(contract))
-                    .await
-                {
-                    error!("Error setting power contract: {:?}", e);
-                    return PdError::Failed.into();
+                if let Some(contract) = status.available_source_contract {
+                    if let Err(e) = state.request_provider_power_capability(contract).await {
+                        error!("Error setting power contract: {:?}", e);
+                        return PdError::Failed.into();
+                    }
+                } else {
+                    // No longer need to source, so disconnect
+                    if let Err(e) = state.disconnect().await {
+                        error!("Error setting power contract: {:?}", e);
+                        return PdError::Failed.into();
+                    }
                 }
             } else {
                 error!("Power device not in detached state");
