@@ -30,7 +30,7 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
         info!("New consumer contract");
 
         if let Some(capability) = status.available_sink_contract {
-            if status.dual_power && capability.max_power_mw() <= DUAL_ROLE_CONSUMER_THRESHOLD {
+            if status.dual_power && capability.max_power_mw() <= DUAL_ROLE_CONSUMER_THRESHOLD_MW {
                 // Don't attempt to sink from a dual-role supply if the power capability is low
                 // This is to prevent sinking from a phone or similar device
                 // Do a PR swap to become the source instead

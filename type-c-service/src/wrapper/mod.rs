@@ -18,7 +18,7 @@ mod power;
 const DEFAULT_SOURCE_CURRENT: TypecCurrent = TypecCurrent::Current1A5;
 /// Threshold power capability before we'll attempt to sink from a dual-role supply
 /// This ensures we don't try to sink from something like a phone
-const DUAL_ROLE_CONSUMER_THRESHOLD: u32 = 15000;
+const DUAL_ROLE_CONSUMER_THRESHOLD_MW: u32 = 15000;
 
 /// Takes an implementation of the `Controller` trait and wraps it with logic to handle
 /// message passing and power-policy integration.
