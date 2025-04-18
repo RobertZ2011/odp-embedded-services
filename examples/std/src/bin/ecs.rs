@@ -1,9 +1,9 @@
-use std::option;
-
 use embassy_executor::Executor;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::once_lock::OnceLock;
-use embedded_services::ecs::{EntityRef, Layer, LayerWrapper};
+use embedded_services::ecs::{
+    Component, ComponentLayer, Entity, EntityRefCell, Layer, LayerResult2, MessageTypedLayer2, RefGuard, RefMutGuard,
+};
 use log::info;
 use static_cell::StaticCell;
 
@@ -70,20 +70,25 @@ mod core {
         }
     }
 
-    impl<T> Component<T> for MessageBridge<'_>
+    impl<E> Component<E> for MessageBridge<'_>
     where
-        T: Trait,
+        E: Trait,
     {
-        type Event = Message;
+        type Message = Message;
+        type Response = Response;
 
-        async fn wait_event(&self, _: &T) -> Self::Event {
+        async fn wait_message(&self, _: &E) -> Self::Message {
             info!("Waiting for message...");
             self.channel.receive_message().await
         }
 
-        async fn process(&self, entity: &mut T, event: Self::Event) {
+        async fn process(&self, entity: &mut E, event: Self::Message) -> Self::Response {
             info!("Processing message: {:?}", event.0);
-            self.channel.send_response(Response(entity.function(event.0))).await;
+            Response(entity.function(event.0))
+        }
+
+        async fn send_response(&self, response: Self::Response) -> () {
+            self.channel.send_response(response).await;
         }
     }
 }
@@ -117,16 +122,21 @@ mod optional {
     where
         T: Trait,
     {
-        type Event = Message;
+        type Message = Message;
+        type Response = Response;
 
-        async fn wait_event(&self, _: &T) -> Self::Event {
+        async fn wait_message(&self, _: &T) -> Self::Message {
             info!("Waiting for optional message...");
             self.channel.receive_message().await
         }
 
-        async fn process(&self, entity: &mut T, event: Self::Event) {
+        async fn process(&self, entity: &mut T, event: Self::Message) -> Self::Response {
             info!("Processing optional message: {:?}", event.0);
-            self.channel.send_response(Response(entity.function(event.0))).await;
+            Response(entity.function(event.0))
+        }
+
+        async fn send_response(&self, response: Self::Response) -> () {
+            self.channel.send_response(response).await;
         }
     }
 }
@@ -145,11 +155,63 @@ impl optional::Trait for Device {
     }
 }
 
+struct TypedObserverLayer<L: MessageTypedLayer2<optional::Message, core::Message>> {
+    inner: L,
+}
+
+impl<L: MessageTypedLayer2<optional::Message, core::Message>> TypedObserverLayer<L> {
+    pub fn new(inner: L) -> Self {
+        Self { inner }
+    }
+}
+
+impl<L: MessageTypedLayer2<optional::Message, core::Message>> Entity for TypedObserverLayer<L> {
+    type Inner = L::Inner;
+
+    #[inline]
+    fn get_entity(&self) -> impl RefGuard<Self::Inner> {
+        self.inner.get_entity()
+    }
+
+    #[inline]
+    fn get_entity_mut(&self) -> impl RefMutGuard<Self::Inner> {
+        self.inner.get_entity_mut()
+    }
+}
+
+impl<L: MessageTypedLayer2<optional::Message, core::Message>> Component<L::Inner> for TypedObserverLayer<L> {
+    type Message = LayerResult2<optional::Message, core::Message>;
+    type Response = L::Response;
+
+    #[inline]
+    async fn wait_message(&self, entity: &L::Inner) -> Self::Message {
+        let m = self.inner.wait_message(entity).await;
+        info!("Got message");
+        m
+    }
+
+    #[inline]
+    async fn process(&self, entity: &mut L::Inner, event: Self::Message) -> Self::Response {
+        let response = self.inner.process(entity, event).await;
+        info!("Processed message");
+        response
+    }
+
+    #[inline]
+    async fn send_response(&self, response: Self::Response) {
+        self.inner.send_response(response).await;
+        info!("Sent response");
+    }
+}
+
+impl<L: MessageTypedLayer2<optional::Message, core::Message>> Layer for TypedObserverLayer<L> {}
+
 #[embassy_executor::task]
 async fn device_task() {
-    let mut device = EntityRef::new(Device)
-        .add_component(core::MessageBridge::new())
-        .add_component(optional::MessageBridge::new());
+    let mut device = EntityRefCell::new(Device)
+        .add_layer(ComponentLayer::with_component(core::MessageBridge::new()))
+        .add_layer(ComponentLayer::with_component(optional::MessageBridge::new()))
+        .add_layer(TypedObserverLayer::new);
 
     loop {
         device.process_all().await;

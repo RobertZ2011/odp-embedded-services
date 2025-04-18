@@ -8,12 +8,26 @@ use core::{
 use embassy_futures::select::{select, Either};
 
 /// Used to chain the results of each layer together
-pub enum List<A, B> {
-    /// Event for the first layer
+pub enum LayerResult<A, B> {
+    /// Event for the current layer
     Head(A),
     /// Events for the rest of the layers
     Rest(B),
 }
+
+/// Type alias for a result from a single layer, the base entity will produce () as the result
+pub type LayerResult1<A> = LayerResult<A, ()>;
+/// Type alias for a result from two layers
+pub type LayerResult2<A, B> = LayerResult<A, LayerResult1<B>>;
+
+//pub type MessageTypedLayer1<A> = Layer<Message = LayerResult1<A>>;
+//pub type MessageTypedLayer2<A, B> = Layer<Message = LayerResult2<A, B>>;
+
+pub trait MessageTypedLayer1<A>: Layer<Message = LayerResult1<A>> {}
+impl<A, L: Layer<Message = LayerResult1<A>>> MessageTypedLayer1<A> for L {}
+
+pub trait MessageTypedLayer2<A, B>: Layer<Message = LayerResult2<A, B>> {}
+impl<A, B, L: Layer<Message = LayerResult2<A, B>>> MessageTypedLayer2<A, B> for L {}
 
 // Type alias that may be helpful using layer results
 /*pub type StackResult1<A> = List<A, ()>;
@@ -27,14 +41,18 @@ pub trait RefGuard<T>: Deref<Target = T> {}
 pub trait RefMutGuard<T>: DerefMut<Target = T> {}
 
 /// Core component type
-pub trait Component<T> {
-    /// Event type that we're waiting for
-    type Event;
+pub trait Component<E> {
+    /// Message type that we're waiting for
+    type Message;
+    /// Response type
+    type Response;
 
-    /// Wait for an event to occur
-    fn wait_event(&self, entity: &T) -> impl Future<Output = Self::Event>;
+    /// Wait for a message
+    fn wait_message(&self, entity: &E) -> impl Future<Output = Self::Message>;
     /// Process the event
-    fn process(&self, entity: &mut T, event: Self::Event) -> impl Future<Output = ()>;
+    fn process(&self, entity: &mut E, event: Self::Message) -> impl Future<Output = Self::Response>;
+    /// Send a response to the message
+    fn send_response(&self, response: Self::Response) -> impl Future<Output = ()>;
 }
 
 /// Entity trait
@@ -51,16 +69,29 @@ pub trait Entity {
 /// Layer trait
 pub trait Layer: Entity + Component<Self::Inner> + Sized {
     /// Process all events for the layer and layers below it
-    fn process_all(&mut self) -> impl Future<Output = ()>;
+    fn process_all(&mut self) -> impl Future<Output = ()> {
+        async {
+            let mut borrow = self.get_entity_mut();
+            let entity = borrow.deref_mut();
+            let event = self.wait_message(entity).await;
+            let response = self.process(entity, event).await;
+            self.send_response(response).await;
+        }
+    }
+
+    /// Wrap the layer in a new layer
+    fn add_layer<O: Layer>(self, f: impl FnOnce(Self) -> O) -> O {
+        f(self)
+    }
 }
 
-/// Layer wrapper that provides common functionality and chaining logic
-pub struct LayerWrapper<L: Layer, C: Component<L::Inner>> {
+/// Layer that wraps a single component
+pub struct ComponentLayer<L: Layer, C: Component<L::Inner>> {
     inner: L,
     component: RefCell<C>,
 }
 
-impl<L: Layer, C: Component<L::Inner>> Entity for LayerWrapper<L, C> {
+impl<L: Layer, C: Component<L::Inner>> Entity for ComponentLayer<L, C> {
     type Inner = L::Inner;
 
     fn get_entity(&self) -> impl RefGuard<Self::Inner> {
@@ -72,42 +103,47 @@ impl<L: Layer, C: Component<L::Inner>> Entity for LayerWrapper<L, C> {
     }
 }
 
-impl<L: Layer, C: Component<L::Inner>> Component<L::Inner> for LayerWrapper<L, C> {
-    type Event = List<C::Event, L::Event>;
+impl<L: Layer, C: Component<L::Inner>> Component<L::Inner> for ComponentLayer<L, C> {
+    type Message = LayerResult<C::Message, L::Message>;
+    type Response = LayerResult<C::Response, L::Response>;
 
     #[inline]
-    async fn wait_event(&self, entity: &L::Inner) -> Self::Event {
+    async fn wait_message(&self, entity: &L::Inner) -> Self::Message {
         let mut borrow = self.component.borrow_mut();
         let component = borrow.deref_mut();
 
-        match select(component.wait_event(entity), self.inner.wait_event(entity)).await {
-            Either::First(event) => List::Head(event),
-            Either::Second(event) => List::Rest(event),
+        match select(component.wait_message(entity), self.inner.wait_message(entity)).await {
+            Either::First(event) => LayerResult::Head(event),
+            Either::Second(event) => LayerResult::Rest(event),
         }
     }
 
     #[inline]
-    async fn process(&self, entity: &mut L::Inner, event: Self::Event) -> () {
+    async fn process(&self, entity: &mut L::Inner, event: Self::Message) -> Self::Response {
         let mut borrow = self.component.borrow_mut();
         let component = borrow.deref_mut();
 
         match event {
-            List::Head(event) => component.process(entity, event).await,
-            List::Rest(event) => self.inner.process(entity, event).await,
+            LayerResult::Head(event) => LayerResult::Head(component.process(entity, event).await),
+            LayerResult::Rest(event) => LayerResult::Rest(self.inner.process(entity, event).await),
+        }
+    }
+
+    #[inline]
+    async fn send_response(&self, response: Self::Response) {
+        let mut borrow = self.component.borrow_mut();
+        let component = borrow.deref_mut();
+
+        match response {
+            LayerResult::Head(response) => component.send_response(response).await,
+            LayerResult::Rest(response) => self.inner.send_response(response).await,
         }
     }
 }
 
-impl<L: Layer, C: Component<L::Inner>> Layer for LayerWrapper<L, C> {
-    async fn process_all(&mut self) {
-        let mut borrow = self.get_entity_mut();
-        let entity = borrow.deref_mut();
-        let event = self.wait_event(entity).await;
-        self.process(entity, event).await;
-    }
-}
+impl<L: Layer, C: Component<L::Inner>> Layer for ComponentLayer<L, C> {}
 
-impl<L: Layer, C: Component<L::Inner>> LayerWrapper<L, C> {
+impl<L: Layer, C: Component<L::Inner>> ComponentLayer<L, C> {
     /// Create a new layer wrapper
     pub fn new(layer: L, component: C) -> Self {
         Self {
@@ -116,35 +152,34 @@ impl<L: Layer, C: Component<L::Inner>> LayerWrapper<L, C> {
         }
     }
 
-    /// Add a new component as a new layer on top of us
-    pub fn add_component<C2: Component<L::Inner>>(self, component: C2) -> LayerWrapper<Self, C2> {
-        LayerWrapper::new(self, component)
+    pub fn with_component(component: C) -> impl FnOnce(L) -> Self {
+        |l| ComponentLayer::new(l, component)
     }
 }
 
 /// Entity that stores its value in a RefCell
-pub struct EntityRef<T> {
-    inner: RefCell<T>,
+pub struct EntityRefCell<E> {
+    inner: RefCell<E>,
 }
 
 impl<T> RefGuard<T> for Ref<'_, T> {}
 impl<T> RefMutGuard<T> for RefMut<'_, T> {}
 
-impl<T> EntityRef<T> {
+impl<E> EntityRefCell<E> {
     /// Create a new entity reference
-    pub fn new(entity: T) -> Self {
+    pub fn new(entity: E) -> Self {
         Self {
             inner: RefCell::new(entity),
         }
     }
 
     /// Wrap the entity in a new component layer
-    pub fn add_component<C: Component<T>>(self, component: C) -> LayerWrapper<Self, C> {
-        LayerWrapper::new(self, component)
+    pub fn add_component<C: Component<E>>(self, component: C) -> ComponentLayer<Self, C> {
+        ComponentLayer::new(self, component)
     }
 }
 
-impl<T> Entity for EntityRef<T> {
+impl<T> Entity for EntityRefCell<T> {
     type Inner = T;
 
     #[inline]
@@ -158,21 +193,27 @@ impl<T> Entity for EntityRef<T> {
     }
 }
 
-impl<T> Component<T> for EntityRef<T> {
-    type Event = ();
+impl<E> Component<E> for EntityRefCell<E> {
+    type Message = ();
+    type Response = ();
 
     #[inline]
-    async fn wait_event(&self, _: &T) -> Self::Event {
+    async fn wait_message(&self, _: &E) -> Self::Message {
         future::pending().await
     }
 
     #[inline]
-    async fn process(&self, _: &mut T, _: Self::Event) {
+    async fn process(&self, _: &mut E, _: Self::Message) {
+        ()
+    }
+
+    #[inline]
+    async fn send_response(&self, _: Self::Response) {
         ()
     }
 }
 
-impl<T> Layer for EntityRef<T> {
+impl<T> Layer for EntityRefCell<T> {
     async fn process_all(&mut self) {
         ()
     }
