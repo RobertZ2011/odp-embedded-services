@@ -2,9 +2,9 @@ use embassy_executor::Executor;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::once_lock::OnceLock;
 use embedded_services::transformers::{
-    layer::{ComponentLayer, Layer, MessageTypedLayer2},
+    layer::{ComponentLayer, Layer, Observe, ObserverLayer},
     result::{Get, Nested2},
-    Component, Entity, EntityRefCell, RefGuard, RefMutGuard,
+    EntityRefCell,
 };
 use log::info;
 use static_cell::StaticCell;
@@ -157,66 +157,31 @@ impl optional::Trait for Device {
     }
 }
 
-struct TypedObserverLayer<L: MessageTypedLayer2<optional::Message, core::Message>> {
-    inner: L,
-}
+struct DebugObserver;
 
-impl<L: MessageTypedLayer2<optional::Message, core::Message>> TypedObserverLayer<L> {
-    pub fn new(inner: L) -> Self {
-        Self { inner }
-    }
-}
-
-impl<L: MessageTypedLayer2<optional::Message, core::Message>> Entity for TypedObserverLayer<L> {
-    type Inner = L::Inner;
-
-    #[inline]
-    fn get_entity(&self) -> impl RefGuard<Self::Inner> {
-        self.inner.get_entity()
-    }
-
-    #[inline]
-    fn get_entity_mut(&self) -> impl RefMutGuard<Self::Inner> {
-        self.inner.get_entity_mut()
-    }
-}
-
-impl<L: MessageTypedLayer2<optional::Message, core::Message>> Component<L::Inner> for TypedObserverLayer<L> {
+impl Observe for DebugObserver {
     type Message = Nested2<optional::Message, core::Message>;
-    type Response = L::Response;
+    type Response = Nested2<optional::Response, core::Response>;
 
-    #[inline]
-    async fn wait_message(&self, entity: &L::Inner) -> Self::Message {
-        let l = self.inner.wait_message(entity).await;
-        if let Some(m) = Get::<optional::Message, _>::get(&l) {
-            info!("Got message: {:#?}", m);
+    fn observe_message(&self, message: &Self::Message) {
+        if let Some(message) = Get::<core::Message, _>::get(message) {
+            info!("DebugObserver: Received core message: {:?}", message.0);
         }
-
-        l
     }
 
-    #[inline]
-    async fn process(&self, entity: &mut L::Inner, event: Self::Message) -> Self::Response {
-        let response = self.inner.process(entity, event).await;
-        info!("Processed message");
-        response
-    }
-
-    #[inline]
-    async fn send_response(&self, response: Self::Response) {
-        self.inner.send_response(response).await;
-        info!("Sent response");
+    fn observe_response(&self, response: &Self::Response) {
+        if let Some(response) = Get::<core::Response, _>::get(response) {
+            info!("DebugObserver: Received core response: {:?}", response.0);
+        }
     }
 }
-
-impl<L: MessageTypedLayer2<optional::Message, core::Message>> Layer for TypedObserverLayer<L> {}
 
 #[embassy_executor::task]
 async fn device_task() {
     let mut device = EntityRefCell::new(Device)
         .add_layer(ComponentLayer::with_component(core::MessageBridge::new()))
         .add_layer(ComponentLayer::with_component(optional::MessageBridge::new()))
-        .add_layer(TypedObserverLayer::new);
+        .add_layer(ObserverLayer::with_observer(DebugObserver));
 
     loop {
         device.process_all().await;
