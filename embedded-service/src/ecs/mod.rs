@@ -1,5 +1,6 @@
 //! Embedded Entity-Component System (ECS)
 use core::{
+    borrow::BorrowMut,
     cell::{Ref, RefCell, RefMut},
     future::{self, Future},
     ops::{Deref, DerefMut},
@@ -20,19 +21,123 @@ pub type LayerResult1<A> = LayerResult<A, ()>;
 /// Type alias for a result from two layers
 pub type LayerResult2<A, B> = LayerResult<A, LayerResult1<B>>;
 
-//pub type MessageTypedLayer1<A> = Layer<Message = LayerResult1<A>>;
-//pub type MessageTypedLayer2<A, B> = Layer<Message = LayerResult2<A, B>>;
-
 pub trait MessageTypedLayer1<A>: Layer<Message = LayerResult1<A>> {}
 impl<A, L: Layer<Message = LayerResult1<A>>> MessageTypedLayer1<A> for L {}
 
 pub trait MessageTypedLayer2<A, B>: Layer<Message = LayerResult2<A, B>> {}
 impl<A, B, L: Layer<Message = LayerResult2<A, B>>> MessageTypedLayer2<A, B> for L {}
 
-// Type alias that may be helpful using layer results
-/*pub type StackResult1<A> = List<A, ()>;
-pub type StackResult2<A, B> = List<A, StackResult1<B>>;
-pub type StackResult3<A, B, C> = List<A, StackResult2<B, C>>;*/
+pub enum ResultView0<'a, A> {
+    Result0(&'a A),
+}
+pub enum ResultViewMut0<'a, A> {
+    Result0(&'a mut A),
+}
+
+impl<'a, A> TryFrom<&'a LayerResult1<A>> for ResultView0<'a, A> {
+    type Error = ();
+
+    fn try_from(value: &'a LayerResult1<A>) -> Result<Self, Self::Error> {
+        match value {
+            LayerResult::Head(a) => Ok(ResultView0::Result0(a)),
+            LayerResult::Rest(_) => Err(()),
+        }
+    }
+}
+
+impl<'a, A> TryFrom<&'a mut LayerResult1<A>> for ResultViewMut0<'a, A> {
+    type Error = ();
+
+    fn try_from(value: &'a mut LayerResult1<A>) -> Result<Self, Self::Error> {
+        match value {
+            LayerResult::Head(a) => Ok(ResultViewMut0::Result0(a)),
+            LayerResult::Rest(_) => Err(()),
+        }
+    }
+}
+
+pub struct Index0;
+pub struct Index1;
+pub struct Index2;
+
+trait Index {}
+
+impl Index for Index0 {}
+impl Index for Index1 {}
+impl Index for Index2 {}
+
+pub trait Get<T, I: Index> {
+    /// Get the inner type
+    fn get(&self) -> Option<&T>;
+}
+
+impl<'a, A> Get<A, Index0> for ResultView0<'a, A> {
+    fn get(&self) -> Option<&A> {
+        match self {
+            ResultView0::Result0(a) => Some(a),
+        }
+    }
+}
+
+impl<'a, A, B> Get<A, Index0> for ResultView1<'a, A, B> {
+    fn get(&self) -> Option<&A> {
+        match self {
+            ResultView1::Result0(a) => Some(a),
+            ResultView1::Result1(_) => None,
+        }
+    }
+}
+impl<'a, A, B> Get<B, Index1> for ResultView1<'a, A, B> {
+    fn get(&self) -> Option<&B> {
+        match self {
+            ResultView1::Result0(_) => None,
+            ResultView1::Result1(b) => Some(b),
+        }
+    }
+}
+
+pub enum ResultView1<'a, A, B> {
+    Result0(&'a A),
+    Result1(&'a B),
+}
+
+impl<'a, A, B> TryFrom<&'a LayerResult2<A, B>> for ResultView1<'a, A, B> {
+    type Error = ();
+
+    fn try_from(value: &'a LayerResult2<A, B>) -> Result<Self, Self::Error> {
+        match value {
+            LayerResult::Head(a) => Ok(ResultView1::Result0(a)),
+            LayerResult::Rest(b) => match b.try_into() {
+                Ok(ResultView0::Result0(b)) => Ok(ResultView1::Result1(b)),
+                Err(_) => Err(()),
+            },
+        }
+    }
+}
+pub enum ResultViewMut1<'a, A, B> {
+    Result0(&'a mut A),
+    Result1(&'a mut B),
+}
+
+pub enum ResultView2<'a, A, B> {
+    Result0(&'a A),
+    Result1(&'a B),
+}
+pub enum ResultViewMut2<'a, A, B> {
+    Result0(&'a mut A),
+    Result1(&'a mut B),
+}
+
+pub enum ResultView3<'a, A, B, C> {
+    Result0(&'a A),
+    Result1(&'a B),
+    Result2(&'a C),
+}
+pub enum ResultViewMut3<'a, A, B, C> {
+    Result0(&'a mut A),
+    Result1(&'a mut B),
+    Result2(&'a mut C),
+}
 
 /// Trait to allow for borrowing a reference to the inner type
 pub trait RefGuard<T>: Deref<Target = T> {}
