@@ -12,11 +12,11 @@ pub mod buffer;
 pub mod cfu;
 pub mod comms;
 pub mod ec_type;
-pub mod ecs;
 pub mod fmt;
 pub mod hid;
 pub mod keyboard;
 pub mod power;
+pub mod transformers;
 pub mod type_c;
 
 /// initialize all service static interfaces as required. Ideally, this is done before subsystem initialization

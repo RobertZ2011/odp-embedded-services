@@ -2,8 +2,8 @@ use embassy_executor::Executor;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::once_lock::OnceLock;
 use embedded_services::transformers::{
-    Component, ComponentLayer, Entity, EntityRefCell, Get, Layer, LayerResult2, MessageTypedLayer2, RefGuard,
-    RefMutGuard, ResultView1,
+    result::{Get, Nested2},
+    Component, ComponentLayer, Entity, EntityRefCell, Layer, MessageTypedLayer2, RefGuard, RefMutGuard,
 };
 use log::info;
 use static_cell::StaticCell;
@@ -181,14 +181,13 @@ impl<L: MessageTypedLayer2<optional::Message, core::Message>> Entity for TypedOb
 }
 
 impl<L: MessageTypedLayer2<optional::Message, core::Message>> Component<L::Inner> for TypedObserverLayer<L> {
-    type Message = LayerResult2<optional::Message, core::Message>;
+    type Message = Nested2<optional::Message, core::Message>;
     type Response = L::Response;
 
     #[inline]
     async fn wait_message(&self, entity: &L::Inner) -> Self::Message {
         let l = self.inner.wait_message(entity).await;
-        let m = ResultView1::try_from(&l).unwrap();
-        if let Some(m) = Get::<optional::Message, _>::get(&m) {
+        if let Some(m) = Get::<optional::Message, _>::get(&l) {
             info!("Got message: {:#?}", m);
         }
 
