@@ -12,6 +12,8 @@ pub mod modify;
 pub use modify::*;
 pub mod observe;
 pub use observe::*;
+pub mod r#override;
+pub use r#override::*;
 
 /// Layer trait
 pub trait Layer: Entity + Component<Self::Inner> + Sized {

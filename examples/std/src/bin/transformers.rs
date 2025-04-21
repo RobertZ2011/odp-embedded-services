@@ -2,8 +2,8 @@ use embassy_executor::Executor;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::once_lock::OnceLock;
 use embedded_services::transformers::{
-    layer::{ComponentLayer, Layer, ModifierLayer, Modify, Observe},
-    result::{Get, GetMut, Nested2},
+    layer::{ComponentLayer, Layer, Modify, Observe, Override, OverrideLayer},
+    result::{Get, GetMut, Nested, Nested2},
     EntityRefCell,
 };
 use log::info;
@@ -195,12 +195,31 @@ impl Modify for Debug {
     }
 }
 
+impl Override for Debug {
+    type Message = Nested2<optional::Message, core::Message>;
+    type Response = Nested2<optional::Response, core::Response>;
+
+    async fn r#override(&self, message: &Self::Message) -> Option<Self::Response> {
+        if let Some(message) = Get::<core::Message, _>::get(message) {
+            if message.0 % 2 == 0 {
+                info!("DebugOverride: Overriding even core message: {:?}", message.0);
+                Some(Nested::Other(Nested::Some(core::Response(message.0 + 1))))
+            } else {
+                info!("DebugOverride: Not overriding odd core message: {:?}", message.0);
+                None
+            }
+        } else {
+            None
+        }
+    }
+}
+
 #[embassy_executor::task]
 async fn device_task() {
     let mut device = EntityRefCell::new(Device)
         .add_layer(ComponentLayer::with_component(core::MessageBridge::new()))
         .add_layer(ComponentLayer::with_component(optional::MessageBridge::new()))
-        .add_layer(ModifierLayer::with_modifier(Debug));
+        .add_layer(OverrideLayer::with_override(Debug));
 
     loop {
         device.process_all().await;
