@@ -5,16 +5,10 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
+pub mod layer;
 pub mod result;
 
-use embassy_futures::select::{select, Either};
-use result::{Nested, Nested1, Nested2};
-
-pub trait MessageTypedLayer1<A>: Layer<Message = Nested1<A>> {}
-impl<A, L: Layer<Message = Nested1<A>>> MessageTypedLayer1<A> for L {}
-
-pub trait MessageTypedLayer2<A, B>: Layer<Message = Nested2<A, B>> {}
-impl<A, B, L: Layer<Message = Nested2<A, B>>> MessageTypedLayer2<A, B> for L {}
+use layer::Layer;
 
 /// Trait to allow for borrowing a reference to the inner type
 pub trait RefGuard<T>: Deref<Target = T> {}
@@ -48,97 +42,6 @@ pub trait Entity {
     fn get_entity_mut(&self) -> impl RefMutGuard<Self::Inner>;
 }
 
-/// Layer trait
-pub trait Layer: Entity + Component<Self::Inner> + Sized {
-    /// Process all events for the layer and layers below it
-    fn process_all(&mut self) -> impl Future<Output = ()> {
-        async {
-            let mut borrow = self.get_entity_mut();
-            let entity = borrow.deref_mut();
-            let event = self.wait_message(entity).await;
-            let response = self.process(entity, event).await;
-            self.send_response(response).await;
-        }
-    }
-
-    /// Wrap the layer in a new layer
-    fn add_layer<O: Layer>(self, f: impl FnOnce(Self) -> O) -> O {
-        f(self)
-    }
-}
-
-/// Layer that wraps a single component
-pub struct ComponentLayer<L: Layer, C: Component<L::Inner>> {
-    inner: L,
-    component: RefCell<C>,
-}
-
-impl<L: Layer, C: Component<L::Inner>> Entity for ComponentLayer<L, C> {
-    type Inner = L::Inner;
-
-    fn get_entity(&self) -> impl RefGuard<Self::Inner> {
-        self.inner.get_entity()
-    }
-
-    fn get_entity_mut(&self) -> impl RefMutGuard<Self::Inner> {
-        self.inner.get_entity_mut()
-    }
-}
-
-impl<L: Layer, C: Component<L::Inner>> Component<L::Inner> for ComponentLayer<L, C> {
-    type Message = Nested<C::Message, L::Message>;
-    type Response = Nested<C::Response, L::Response>;
-
-    #[inline]
-    async fn wait_message(&self, entity: &L::Inner) -> Self::Message {
-        let mut borrow = self.component.borrow_mut();
-        let component = borrow.deref_mut();
-
-        match select(component.wait_message(entity), self.inner.wait_message(entity)).await {
-            Either::First(event) => Nested::Some(event),
-            Either::Second(event) => Nested::Other(event),
-        }
-    }
-
-    #[inline]
-    async fn process(&self, entity: &mut L::Inner, event: Self::Message) -> Self::Response {
-        let mut borrow = self.component.borrow_mut();
-        let component = borrow.deref_mut();
-
-        match event {
-            Nested::Some(event) => Nested::Some(component.process(entity, event).await),
-            Nested::Other(event) => Nested::Other(self.inner.process(entity, event).await),
-        }
-    }
-
-    #[inline]
-    async fn send_response(&self, response: Self::Response) {
-        let mut borrow = self.component.borrow_mut();
-        let component = borrow.deref_mut();
-
-        match response {
-            Nested::Some(response) => component.send_response(response).await,
-            Nested::Other(response) => self.inner.send_response(response).await,
-        }
-    }
-}
-
-impl<L: Layer, C: Component<L::Inner>> Layer for ComponentLayer<L, C> {}
-
-impl<L: Layer, C: Component<L::Inner>> ComponentLayer<L, C> {
-    /// Create a new layer wrapper
-    pub fn new(layer: L, component: C) -> Self {
-        Self {
-            inner: layer,
-            component: RefCell::new(component),
-        }
-    }
-
-    pub fn with_component(component: C) -> impl FnOnce(L) -> Self {
-        |l| ComponentLayer::new(l, component)
-    }
-}
-
 /// Entity that stores its value in a RefCell
 pub struct EntityRefCell<E> {
     inner: RefCell<E>,
@@ -153,11 +56,6 @@ impl<E> EntityRefCell<E> {
         Self {
             inner: RefCell::new(entity),
         }
-    }
-
-    /// Wrap the entity in a new component layer
-    pub fn add_component<C: Component<E>>(self, component: C) -> ComponentLayer<Self, C> {
-        ComponentLayer::new(self, component)
     }
 }
 

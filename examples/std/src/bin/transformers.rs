@@ -2,8 +2,9 @@ use embassy_executor::Executor;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::once_lock::OnceLock;
 use embedded_services::transformers::{
+    layer::{ComponentLayer, Layer, MessageTypedLayer2},
     result::{Get, Nested2},
-    Component, ComponentLayer, Entity, EntityRefCell, Layer, MessageTypedLayer2, RefGuard, RefMutGuard,
+    Component, Entity, EntityRefCell, RefGuard, RefMutGuard,
 };
 use log::info;
 use static_cell::StaticCell;
