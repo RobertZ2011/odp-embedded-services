@@ -8,6 +8,8 @@ use super::{
 
 pub mod component;
 pub use component::*;
+pub mod modify;
+pub use modify::*;
 pub mod observe;
 pub use observe::*;
 

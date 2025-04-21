@@ -2,8 +2,8 @@ use embassy_executor::Executor;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::once_lock::OnceLock;
 use embedded_services::transformers::{
-    layer::{ComponentLayer, Layer, Observe, ObserverLayer},
-    result::{Get, Nested2},
+    layer::{ComponentLayer, Layer, ModifierLayer, Modify, Observe},
+    result::{Get, GetMut, Nested2},
     EntityRefCell,
 };
 use log::info;
@@ -157,9 +157,9 @@ impl optional::Trait for Device {
     }
 }
 
-struct DebugObserver;
+struct Debug;
 
-impl Observe for DebugObserver {
+impl Observe for Debug {
     type Message = Nested2<optional::Message, core::Message>;
     type Response = Nested2<optional::Response, core::Response>;
 
@@ -176,12 +176,31 @@ impl Observe for DebugObserver {
     }
 }
 
+impl Modify for Debug {
+    type Message = Nested2<optional::Message, core::Message>;
+    type Response = Nested2<optional::Response, core::Response>;
+
+    fn modify_message(&self, message: &mut Self::Message) {
+        if let Some(message) = GetMut::<core::Message, _>::get_mut(message) {
+            message.0 += 1;
+            info!("DebugModifier: Modified core message: {:?}", message.0);
+        }
+    }
+
+    fn modify_response(&self, response: &mut Self::Response) {
+        if let Some(response) = GetMut::<core::Response, _>::get_mut(response) {
+            response.0 += 1;
+            info!("DebugModifier: Modified core response: {:?}", response.0);
+        }
+    }
+}
+
 #[embassy_executor::task]
 async fn device_task() {
     let mut device = EntityRefCell::new(Device)
         .add_layer(ComponentLayer::with_component(core::MessageBridge::new()))
         .add_layer(ComponentLayer::with_component(optional::MessageBridge::new()))
-        .add_layer(ObserverLayer::with_observer(DebugObserver));
+        .add_layer(ModifierLayer::with_modifier(Debug));
 
     loop {
         device.process_all().await;
