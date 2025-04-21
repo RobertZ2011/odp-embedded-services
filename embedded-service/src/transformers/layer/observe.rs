@@ -2,7 +2,10 @@
 
 use super::Layer;
 use crate::transformers::{Component, Entity, RefGuard, RefMutGuard};
-use core::cell::RefCell;
+use core::{
+    cell::RefCell,
+    future::{self, Future},
+};
 
 ///
 pub trait Observe {
@@ -12,10 +15,14 @@ pub trait Observe {
     type Response;
 
     /// Default implementation that does nothing
-    fn observe_message(&self, _message: &Self::Message) {}
+    fn observe_message(&self, _message: &Self::Message) -> impl Future<Output = ()> {
+        future::ready(())
+    }
 
     /// Default implementation that does nothing
-    fn observe_response(&self, _response: &Self::Response) {}
+    fn observe_response(&self, _response: &Self::Response) -> impl Future<Output = ()> {
+        future::ready(())
+    }
 }
 
 /// Layer that wraps a single observer
@@ -58,14 +65,14 @@ impl<L: Layer, O: Observe<Message = L::Message, Response = L::Response>> Compone
     #[inline]
     async fn wait_message(&self, entity: &L::Inner) -> Self::Message {
         let message = self.inner.wait_message(entity).await;
-        self.observe.borrow_mut().observe_message(&message);
+        self.observe.borrow_mut().observe_message(&message).await;
         message
     }
 
     #[inline]
     async fn process(&self, entity: &mut L::Inner, event: Self::Message) -> Self::Response {
         let response = self.inner.process(entity, event).await;
-        self.observe.borrow_mut().observe_response(&response);
+        self.observe.borrow_mut().observe_response(&response).await;
         response
     }
 

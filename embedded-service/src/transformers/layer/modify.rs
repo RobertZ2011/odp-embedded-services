@@ -1,6 +1,9 @@
 //! Module for a layer that can modify messages and responses
 
-use core::cell::RefCell;
+use core::{
+    cell::RefCell,
+    future::{self, Future},
+};
 
 use crate::transformers::{Component, Entity, RefGuard, RefMutGuard};
 
@@ -14,10 +17,14 @@ pub trait Modify {
     type Response;
 
     /// Default implementation that does nothing
-    fn modify_message(&self, _message: &mut Self::Message) {}
+    fn modify_message(&self, _message: &mut Self::Message) -> impl Future<Output = ()> {
+        future::ready(())
+    }
 
     /// Default implementation that does nothing
-    fn modify_response(&self, _response: &mut Self::Response) {}
+    fn modify_response(&self, _response: &mut Self::Response) -> impl Future<Output = ()> {
+        future::ready(())
+    }
 }
 
 /// Layer that wraps a single modifier
@@ -60,14 +67,14 @@ impl<L: Layer, M: Modify<Message = L::Message, Response = L::Response>> Componen
     #[inline]
     async fn wait_message(&self, entity: &L::Inner) -> Self::Message {
         let mut message = self.inner.wait_message(entity).await;
-        self.observe.borrow_mut().modify_message(&mut message);
+        self.observe.borrow_mut().modify_message(&mut message).await;
         message
     }
 
     #[inline]
     async fn process(&self, entity: &mut L::Inner, event: Self::Message) -> Self::Response {
         let mut response = self.inner.process(entity, event).await;
-        self.observe.borrow_mut().modify_response(&mut response);
+        self.observe.borrow_mut().modify_response(&mut response).await;
         response
     }
 

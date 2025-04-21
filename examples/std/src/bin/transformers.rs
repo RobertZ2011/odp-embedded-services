@@ -163,13 +163,13 @@ impl Observe for Debug {
     type Message = Nested2<optional::Message, core::Message>;
     type Response = Nested2<optional::Response, core::Response>;
 
-    fn observe_message(&self, message: &Self::Message) {
+    async fn observe_message(&self, message: &Self::Message) {
         if let Some(message) = Get::<core::Message, _>::get(message) {
             info!("DebugObserver: Received core message: {:?}", message.0);
         }
     }
 
-    fn observe_response(&self, response: &Self::Response) {
+    async fn observe_response(&self, response: &Self::Response) {
         if let Some(response) = Get::<core::Response, _>::get(response) {
             info!("DebugObserver: Received core response: {:?}", response.0);
         }
@@ -180,14 +180,14 @@ impl Modify for Debug {
     type Message = Nested2<optional::Message, core::Message>;
     type Response = Nested2<optional::Response, core::Response>;
 
-    fn modify_message(&self, message: &mut Self::Message) {
+    async fn modify_message(&self, message: &mut Self::Message) {
         if let Some(message) = GetMut::<core::Message, _>::get_mut(message) {
             message.0 += 1;
             info!("DebugModifier: Modified core message: {:?}", message.0);
         }
     }
 
-    fn modify_response(&self, response: &mut Self::Response) {
+    async fn modify_response(&self, response: &mut Self::Response) {
         if let Some(response) = GetMut::<core::Response, _>::get_mut(response) {
             response.0 += 1;
             info!("DebugModifier: Modified core response: {:?}", response.0);
@@ -202,6 +202,7 @@ impl Override for Debug {
     async fn r#override(&self, message: &Self::Message) -> Option<Self::Response> {
         if let Some(message) = Get::<core::Message, _>::get(message) {
             if message.0 % 2 == 0 {
+                // Implement our custom functionality for even numbers here
                 info!("DebugOverride: Overriding even core message: {:?}", message.0);
                 Some(Nested::Other(Nested::Some(core::Response(message.0 + 1))))
             } else {
