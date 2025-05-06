@@ -45,7 +45,7 @@ impl<'a, S: Kind> Policy<'a, S> {
     async fn disconnect_internal(&self) -> Result<(), Error> {
         info!("Device {} got disconnect request", self.device.id().0);
         self.device
-            .execute_device_request(device::RequestData::Disconnect)
+            .execute_device_command(device::CommandData::Disconnect)
             .await?
             .complete_or_err()?;
         self.device.set_state(device::State::Idle).await;
@@ -58,7 +58,7 @@ impl<'a, S: Kind> Policy<'a, S> {
         info!("Device {} connecting provider", self.device.id().0);
 
         self.device
-            .execute_device_request(device::RequestData::ConnectProvider(capability))
+            .execute_device_command(device::CommandData::ConnectProvider(capability))
             .await?
             .complete_or_err()?;
 
@@ -79,7 +79,7 @@ impl<'a> Policy<'a, Idle> {
         info!("Device {} connecting consumer", self.device.id().0);
 
         self.device
-            .execute_device_request(device::RequestData::ConnectConsumer(capability))
+            .execute_device_command(device::CommandData::ConnectConsumer(capability))
             .await?
             .complete_or_err()?;
 
