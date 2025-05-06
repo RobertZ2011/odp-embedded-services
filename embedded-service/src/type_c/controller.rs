@@ -3,7 +3,6 @@ use core::future::Future;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::channel::Channel;
 use embassy_sync::once_lock::OnceLock;
 use embassy_sync::signal::Signal;
 use embassy_time::{with_timeout, Duration};
@@ -17,6 +16,7 @@ use embedded_usb_pd::{
 
 use super::event::{PortEventFlags, PortEventKind};
 use super::{external, ControllerId};
+use crate::ipc::deferred;
 use crate::power::policy;
 use crate::{intrusive_list, trace, IntrusiveNode};
 
@@ -196,8 +196,7 @@ pub struct Device<'a> {
     id: ControllerId,
     ports: &'a [GlobalPortId],
     num_ports: usize,
-    command: Channel<NoopRawMutex, Command, 1>,
-    response: Channel<NoopRawMutex, Response<'static>, 1>,
+    command: deferred::Channel<NoopRawMutex, Command, Response<'static>>,
 }
 
 impl intrusive_list::NodeContainer for Device<'static> {
@@ -214,15 +213,13 @@ impl<'a> Device<'a> {
             id,
             ports,
             num_ports: ports.len(),
-            command: Channel::new(),
-            response: Channel::new(),
+            command: deferred::Channel::new(),
         }
     }
 
     /// Send a command to this controller
-    pub async fn send_command(&self, command: Command) -> Response {
-        self.command.send(command).await;
-        self.response.receive().await
+    pub async fn execute_command(&self, command: Command) -> Response {
+        self.command.invoke(command).await
     }
 
     /// Check if this controller has the given port
@@ -248,14 +245,9 @@ impl<'a> Device<'a> {
             .ok_or(PdError::InvalidParams)
     }
 
-    /// Wait for a command to be sent to this controller
-    pub async fn wait_command(&self) -> Command {
-        self.command.receive().await
-    }
-
-    /// Send response
-    pub async fn send_response(&self, response: Response<'static>) {
-        self.response.send(response).await;
+    /// Create a command handler for this controller
+    pub async fn wait_invocation(&self) -> deferred::Invocation<NoopRawMutex, Command, Response<'static>> {
+        self.command.wait_invocation().await
     }
 
     /// Notify that there are pending events on one or more ports
@@ -348,9 +340,7 @@ struct Context {
     controllers: intrusive_list::IntrusiveList,
     port_events: Signal<NoopRawMutex, PortEventFlags>,
     /// Channel for receiving commands to the type-C service
-    external_command: Channel<NoopRawMutex, external::Command, 1>,
-    /// Channel for sending responses from the type-C service
-    external_response: Channel<NoopRawMutex, external::Response<'static>, 1>,
+    external_command: deferred::Channel<NoopRawMutex, external::Command, external::Response<'static>>,
 }
 
 impl Context {
@@ -358,8 +348,7 @@ impl Context {
         Self {
             controllers: intrusive_list::IntrusiveList::new(),
             port_events: Signal::new(),
-            external_command: Channel::new(),
-            external_response: Channel::new(),
+            external_command: deferred::Channel::new(),
         }
     }
 }
@@ -431,7 +420,7 @@ impl ContextToken {
         match node
             .data::<Device>()
             .ok_or(PdError::InvalidController)?
-            .send_command(Command::Controller(command))
+            .execute_command(Command::Controller(command))
             .await
         {
             Response::Controller(response) => response,
@@ -486,7 +475,7 @@ impl ContextToken {
         match node
             .data::<Device>()
             .ok_or(PdError::InvalidController)?
-            .send_command(Command::Lpm(lpm::Command {
+            .execute_command(Command::Lpm(lpm::Command {
                 port: port_id,
                 operation: command,
             }))
@@ -531,7 +520,7 @@ impl ContextToken {
         match node
             .data::<Device>()
             .ok_or(PdError::InvalidController)?
-            .send_command(Command::Port(PortCommand {
+            .execute_command(Command::Port(PortCommand {
                 port: port_id,
                 data: command,
             }))
@@ -597,13 +586,10 @@ impl ContextToken {
     }
 
     /// Wait for an external command
-    pub async fn wait_external_command(&self) -> external::Command {
-        CONTEXT.get().await.external_command.receive().await
-    }
-
-    /// Send a response to an external command
-    pub async fn send_external_response(&self, response: external::Response<'static>) {
-        CONTEXT.get().await.external_response.send(response).await;
+    pub async fn wait_external_command(
+        &self,
+    ) -> deferred::Invocation<NoopRawMutex, external::Command, external::Response<'static>> {
+        CONTEXT.get().await.external_command.wait_invocation().await
     }
 }
 
@@ -612,9 +598,7 @@ pub(super) async fn execute_external_port_command(
     command: external::Command,
 ) -> Result<external::PortResponseData, PdError> {
     let context = CONTEXT.get().await;
-
-    context.external_command.send(command).await;
-    if let external::Response::Port(response) = context.external_response.receive().await {
+    if let external::Response::Port(response) = context.external_command.invoke(command).await {
         response
     } else {
         Err(PdError::InvalidResponse)
@@ -626,9 +610,7 @@ pub(super) async fn execute_external_controller_command(
     command: external::Command,
 ) -> Result<external::ControllerResponseData<'static>, PdError> {
     let context = CONTEXT.get().await;
-
-    context.external_command.send(command).await;
-    if let external::Response::Controller(response) = context.external_response.receive().await {
+    if let external::Response::Controller(response) = context.external_command.invoke(command).await {
         response
     } else {
         Err(PdError::InvalidResponse)

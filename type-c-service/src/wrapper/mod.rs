@@ -197,7 +197,7 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
         match select3(
             controller.wait_port_event(),
             self.wait_power_command(),
-            self.pd_controller.wait_command(),
+            self.pd_controller.wait_invocation(),
         )
         .await
         {
@@ -211,7 +211,10 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
                     .await;
                 invocation.send_response(response);
             }
-            Either3::Third(command) => self.process_pd_command(&mut controller, command).await,
+            Either3::Third(invocation) => {
+                let response = self.process_pd_command(&mut controller, &invocation.command).await;
+                invocation.send_response(response);
+            }
         }
     }
 
