@@ -18,7 +18,7 @@ use super::event::{PortEventFlags, PortEventKind};
 use super::{external, ControllerId};
 use crate::ipc::deferred;
 use crate::power::policy;
-use crate::{intrusive_list, trace, IntrusiveNode};
+use crate::{error, intrusive_list, trace, IntrusiveNode};
 
 /// Power contract
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -424,7 +424,10 @@ impl ContextToken {
             .await
         {
             Response::Controller(response) => response,
-            _ => Err(PdError::InvalidResponse),
+            r => {
+                error!("Invalid response: expected controller, got {:?}", r);
+                Err(PdError::InvalidResponse)
+            }
         }
     }
 
@@ -482,7 +485,10 @@ impl ContextToken {
             .await
         {
             Response::Lpm(response) => response,
-            _ => Err(PdError::InvalidResponse),
+            r => {
+                error!("Invalid response: expected LPM, got {:?}", r);
+                Err(PdError::InvalidResponse)
+            }
         }
     }
 
@@ -527,7 +533,10 @@ impl ContextToken {
             .await
         {
             Response::Port(response) => response,
-            _ => Err(PdError::InvalidResponse),
+            r => {
+                error!("Invalid response: expected port, got {:?}", r);
+                Err(PdError::InvalidResponse)
+            }
         }
     }
 
@@ -556,7 +565,10 @@ impl ContextToken {
             .await?
         {
             PortResponseData::ClearEvents(event) => Ok(event),
-            _ => Err(PdError::InvalidResponse),
+            r => {
+                error!("Invalid response: expected clear events, got {:?}", r);
+                Err(PdError::InvalidResponse)
+            }
         }
     }
 
@@ -567,7 +579,10 @@ impl ContextToken {
             .await?
         {
             PortResponseData::PortStatus(status) => Ok(status),
-            _ => Err(PdError::InvalidResponse),
+            r => {
+                error!("Invalid response: expected port status, got {:?}", r);
+                Err(PdError::InvalidResponse)
+            }
         }
     }
 
@@ -581,7 +596,10 @@ impl ContextToken {
             .await?
         {
             InternalResponseData::Status(status) => Ok(status),
-            _ => Err(PdError::InvalidResponse),
+            r => {
+                error!("Invalid response: expected controller status, got {:?}", r);
+                Err(PdError::InvalidResponse)
+            }
         }
     }
 
@@ -598,10 +616,12 @@ pub(super) async fn execute_external_port_command(
     command: external::Command,
 ) -> Result<external::PortResponseData, PdError> {
     let context = CONTEXT.get().await;
-    if let external::Response::Port(response) = context.external_command.invoke(command).await {
-        response
-    } else {
-        Err(PdError::InvalidResponse)
+    match context.external_command.invoke(command).await {
+        external::Response::Port(response) => response,
+        r => {
+            error!("Invalid response: expected external port, got {:?}", r);
+            Err(PdError::InvalidResponse)
+        }
     }
 }
 
@@ -610,9 +630,11 @@ pub(super) async fn execute_external_controller_command(
     command: external::Command,
 ) -> Result<external::ControllerResponseData<'static>, PdError> {
     let context = CONTEXT.get().await;
-    if let external::Response::Controller(response) = context.external_command.invoke(command).await {
-        response
-    } else {
-        Err(PdError::InvalidResponse)
+    match context.external_command.invoke(command).await {
+        external::Response::Controller(response) => response,
+        r => {
+            error!("Invalid response: expected external controller, got {:?}", r);
+            Err(PdError::InvalidResponse)
+        }
     }
 }
