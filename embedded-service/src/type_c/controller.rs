@@ -380,7 +380,9 @@ pub(super) async fn lookup_controller(controller_id: ControllerId) -> Result<&'s
         .ok_or(PdError::InvalidController)
 }
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_millis(250);
+/// Default command timeout
+/// set to high value since this is intended to prevent an unresponsive device from blocking the service implementation
+const DEFAULT_TIMEOUT: Duration = Duration::from_millis(5000);
 
 /// Type to provide access to the PD controller context for service implementations
 pub struct ContextToken(());
@@ -436,9 +438,13 @@ impl ContextToken {
         &self,
         controller_id: ControllerId,
         command: InternalCommandData,
-        timeout: Duration,
     ) -> Result<InternalResponseData<'static>, PdError> {
-        match with_timeout(timeout, self.send_controller_command_no_timeout(controller_id, command)).await {
+        match with_timeout(
+            DEFAULT_TIMEOUT,
+            self.send_controller_command_no_timeout(controller_id, command),
+        )
+        .await
+        {
             Ok(response) => response,
             Err(_) => Err(PdError::Timeout),
         }
@@ -446,7 +452,7 @@ impl ContextToken {
 
     /// Reset the given controller
     pub async fn reset_controller(&self, controller_id: ControllerId) -> Result<(), PdError> {
-        self.send_controller_command(controller_id, InternalCommandData::Reset, DEFAULT_TIMEOUT)
+        self.send_controller_command(controller_id, InternalCommandData::Reset)
             .await
             .map(|_| ())
     }
@@ -497,9 +503,13 @@ impl ContextToken {
         &self,
         port_id: GlobalPortId,
         command: lpm::CommandData,
-        timeout: Duration,
     ) -> Result<lpm::ResponseData, PdError> {
-        match with_timeout(timeout, self.send_port_command_ucsi_no_timeout(port_id, command)).await {
+        match with_timeout(
+            DEFAULT_TIMEOUT,
+            self.send_port_command_ucsi_no_timeout(port_id, command),
+        )
+        .await
+        {
             Ok(response) => response,
             Err(_) => Err(PdError::Timeout),
         }
@@ -511,7 +521,7 @@ impl ContextToken {
         port_id: GlobalPortId,
         reset_type: lpm::ResetType,
     ) -> Result<lpm::ResponseData, PdError> {
-        self.send_port_command_ucsi(port_id, lpm::CommandData::ConnectorReset(reset_type), DEFAULT_TIMEOUT)
+        self.send_port_command_ucsi(port_id, lpm::CommandData::ConnectorReset(reset_type))
             .await
     }
 
@@ -545,9 +555,8 @@ impl ContextToken {
         &self,
         port_id: GlobalPortId,
         command: PortCommandData,
-        timeout: Duration,
     ) -> Result<PortResponseData, PdError> {
-        match with_timeout(timeout, self.send_port_command_no_timeout(port_id, command)).await {
+        match with_timeout(DEFAULT_TIMEOUT, self.send_port_command_no_timeout(port_id, command)).await {
             Ok(response) => response,
             Err(_) => Err(PdError::Timeout),
         }
@@ -560,10 +569,7 @@ impl ContextToken {
 
     /// Get the unhandled events for the given port
     pub async fn get_port_event(&self, port: GlobalPortId) -> Result<PortEventKind, PdError> {
-        match self
-            .send_port_command(port, PortCommandData::ClearEvents, DEFAULT_TIMEOUT)
-            .await?
-        {
+        match self.send_port_command(port, PortCommandData::ClearEvents).await? {
             PortResponseData::ClearEvents(event) => Ok(event),
             r => {
                 error!("Invalid response: expected clear events, got {:?}", r);
@@ -574,10 +580,7 @@ impl ContextToken {
 
     /// Get the current port status
     pub async fn get_port_status(&self, port: GlobalPortId) -> Result<PortStatus, PdError> {
-        match self
-            .send_port_command(port, PortCommandData::PortStatus, DEFAULT_TIMEOUT)
-            .await?
-        {
+        match self.send_port_command(port, PortCommandData::PortStatus).await? {
             PortResponseData::PortStatus(status) => Ok(status),
             r => {
                 error!("Invalid response: expected port status, got {:?}", r);
@@ -592,7 +595,7 @@ impl ContextToken {
         controller_id: ControllerId,
     ) -> Result<ControllerStatus<'static>, PdError> {
         match self
-            .send_controller_command(controller_id, InternalCommandData::Status, DEFAULT_TIMEOUT)
+            .send_controller_command(controller_id, InternalCommandData::Status)
             .await?
         {
             InternalResponseData::Status(status) => Ok(status),
