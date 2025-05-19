@@ -1,9 +1,10 @@
 //! Type-C service
 use controller::Contract;
 use embedded_usb_pd::pdo::{sink, source};
-use embedded_usb_pd::type_c;
+use embedded_usb_pd::{type_c, Error as PdError, PdError as PdErrorKind};
 
 use crate::power::policy;
+use crate::fw_update::{Error as FwError, ErrorKind as FwErrorKind};
 
 pub mod comms;
 pub mod controller;
@@ -148,3 +149,4 @@ pub const POWER_CAPABILITY_5V_3A0: policy::PowerCapability = policy::PowerCapabi
     voltage_mv: 5000,
     current_ma: 3000,
 };
+

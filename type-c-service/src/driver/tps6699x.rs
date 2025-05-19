@@ -9,17 +9,22 @@ use bitfield::bitfield;
 use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::signal::Signal;
+use embassy_time::Delay;
 use embedded_hal_async::i2c::I2c;
 use embedded_services::power::policy::{self, PowerCapability};
 use embedded_services::type_c::controller::{self, Controller, ControllerStatus, PortStatus};
 use embedded_services::type_c::event::PortEventKind;
 use embedded_services::type_c::ControllerId;
 use embedded_services::{debug, info, trace, type_c};
+use embedded_services::fw_update::{FwUpdate, ErrorKind as FwErrorKind, Error as FwError};
 use embedded_usb_pd::pdinfo::PowerPathStatus;
 use embedded_usb_pd::pdo::{sink, source, Common, Rdo};
 use embedded_usb_pd::type_c::Current as TypecCurrent;
 use embedded_usb_pd::{Error, GlobalPortId, PdError, PortId as LocalPortId, PowerRole};
-use tps6699x::asynchronous::embassy as tps6699x;
+use tps6699x::asynchronous::fw_update::{BorrowedUpdater, BorrowedUpdaterInProgress};
+use tps6699x::asynchronous::embassy as tps6699x_drv;
+
+type Updater<'a, M, B> = BorrowedUpdaterInProgress<1, tps6699x_drv::Tps6699x<'a, M, B>>;
 
 use crate::wrapper::ControllerWrapper;
 
@@ -27,23 +32,25 @@ pub struct Tps6699x<'a, const N: usize, M: RawMutex, B: I2c> {
     port_events: [Cell<PortEventKind>; N],
     port_status: [Cell<PortStatus>; N],
     sw_event: Signal<M, ()>,
-    tps6699x: RefCell<tps6699x::Tps6699x<'a, M, B>>,
+    tps6699x: RefCell<tps6699x_drv::Tps6699x<'a, M, B>>,
+    updater: RefCell<Option<Updater<'a, M, B>>>,
 }
 
 impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
-    fn new(tps6699x: tps6699x::Tps6699x<'a, M, B>) -> Self {
+    fn new(tps6699x: tps6699x_drv::Tps6699x<'a, M, B>) -> Self {
         Self {
             port_events: [const { Cell::new(PortEventKind::none()) }; N],
             port_status: [const { Cell::new(PortStatus::new()) }; N],
             sw_event: Signal::new(),
             tps6699x: RefCell::new(tps6699x),
+            updater: RefCell::new(None),
         }
     }
 
     /// Reads and caches the current status of the port, returns any detected events
     async fn update_port_status(
         &self,
-        tps6699x: &mut tps6699x::Tps6699x<'a, M, B>,
+        tps6699x: &mut tps6699x_drv::Tps6699x<'a, M, B>,
         port: LocalPortId,
     ) -> Result<PortEventKind, Error<B::Error>> {
         let mut events = PortEventKind::none();
@@ -151,7 +158,7 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
     }
 
     /// Wait for an event on any port
-    async fn wait_interrupt_event(&self, tps6699x: &mut tps6699x::Tps6699x<'a, M, B>) -> Result<(), Error<B::Error>> {
+    async fn wait_interrupt_event(&self, tps6699x: &mut tps6699x_drv::Tps6699x<'a, M, B>) -> Result<(), Error<B::Error>> {
         let interrupts = tps6699x.wait_interrupt(false, |_, _| true).await;
 
         for (interrupt, cell) in zip(interrupts.iter(), self.port_events.iter()) {
@@ -337,6 +344,59 @@ impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
     }
 }
 
+impl<const N: usize, M: RawMutex, B: I2c> FwUpdate for Tps6699x<'_, N, M, B> {
+    type BusError = Error<B::Error>;
+
+    async fn get_active_fw_version(&self) -> Result<u32, FwError<Self::BusError>> {
+        let mut tps6699x = self.tps6699x.borrow_mut();
+        Ok(CustomerUse(tps6699x.get_customer_use().await.map_err(FwError::Bus)?).custom_fw_version())     
+    }
+
+    async fn start_fw_update(&mut self) -> Result<(), FwError<Self::BusError>> {
+        let mut tps6699x = self.tps6699x.borrow_mut();
+        let mut delay = Delay;
+        let mut updater: BorrowedUpdater<1, tps6699x_drv::Tps6699x<'_, M, B>> = Default::default();
+
+        let in_progress = updater.start_fw_update(&mut [&mut tps6699x], &mut delay).await.map_err(FwError::Bus)?;
+        self.updater.replace(Some(in_progress));
+        Ok(())
+    }
+
+    async fn abort_fw_update(&mut self) -> Result<(), FwError<Self::BusError>> {
+        let mut tps6699x = self.tps6699x.borrow_mut();
+        if let Some(updater) = self.updater.replace(None) {
+            let mut delay = Delay;
+            updater.abort_fw_update(&mut [&mut tps6699x], &mut delay).await;
+            Ok(())
+        } else {
+            Err(FwError::General(FwErrorKind::InvalidMode))
+        }
+    }
+
+    async fn finalize_fw_update(&mut self) -> Result<(), FwError<Self::BusError>> {
+        let mut tps6699x = self.tps6699x.borrow_mut();
+        if let Some(updater) = self.updater.replace(None) {
+            let mut delay = Delay;
+            updater.complete_fw_update(&mut [&mut tps6699x], &mut delay).await.map_err(FwError::Bus)?;
+            Ok(())
+        } else {
+            Err(FwError::General(FwErrorKind::InvalidMode))
+        }
+    }
+
+    async fn write_fw_contents(&mut self, _offset: usize, data: &[u8]) -> Result<(), FwError<Self::BusError>> {
+        let mut tps6699x = self.tps6699x.borrow_mut();
+        let mut updater = self.updater.borrow_mut();
+        if let Some(updater) = updater.as_mut() {
+            let mut delay = Delay;
+            updater.write_bytes(&mut [&mut tps6699x], &mut delay, data).await.map_err(FwError::Bus)?;
+            Ok(())
+        } else {
+            Err(FwError::General(FwErrorKind::InvalidMode))
+        }
+    }
+}
+
 /// TPS66994 controller wrapper
 pub type Tps66994Wrapper<'a, M, B> = ControllerWrapper<'a, TPS66994_NUM_PORTS, Tps6699x<'a, TPS66994_NUM_PORTS, M, B>>;
 
@@ -345,7 +405,7 @@ pub type Tps66993Wrapper<'a, M, B> = ControllerWrapper<'a, TPS66993_NUM_PORTS, T
 
 /// Create a TPS66994 controller wrapper
 pub fn tps66994<'a, M: RawMutex, B: I2c>(
-    controller: tps6699x::Tps6699x<'a, M, B>,
+    controller: tps6699x_drv::Tps6699x<'a, M, B>,
     controller_id: ControllerId,
     port_ids: &'a [GlobalPortId],
     power_ids: [policy::DeviceId; TPS66994_NUM_PORTS],
@@ -363,7 +423,7 @@ pub fn tps66994<'a, M: RawMutex, B: I2c>(
 
 /// Create a new TPS66993 controller wrapper
 pub fn tps66993<'a, M: RawMutex, B: I2c>(
-    controller: tps6699x::Tps6699x<'a, M, B>,
+    controller: tps6699x_drv::Tps6699x<'a, M, B>,
     controller_id: ControllerId,
     port_ids: &'a [GlobalPortId],
     power_ids: [policy::DeviceId; TPS66993_NUM_PORTS],
