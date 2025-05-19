@@ -67,7 +67,12 @@ static_cell = "2.1.0"
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
 
+embedded-cfu-protocol = { git = "https://github.com/OpenDevicePartnership/embedded-cfu" }
+
 platform-service = { path = "../../platform-service", features = [
     "defmt",
     "imxrt685",
 ] }
+
+[patch.'https://github.com/OpenDevicePartnership/tps6699x']
+tps6699x = { path = "../../../tps6699x" }

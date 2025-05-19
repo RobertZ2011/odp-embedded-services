@@ -1,5 +1,6 @@
 //! Cfu Service related data structures and messages
 //pub mod action;
+pub mod bridge;
 pub mod component;
 
 use core::sync::atomic::{AtomicBool, Ordering};

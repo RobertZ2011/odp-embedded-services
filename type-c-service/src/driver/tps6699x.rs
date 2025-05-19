@@ -37,7 +37,7 @@ pub struct Tps6699x<'a, const N: usize, M: RawMutex, B: I2c> {
 }
 
 impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
-    fn new(tps6699x: tps6699x_drv::Tps6699x<'a, M, B>) -> Self {
+    pub fn new(tps6699x: tps6699x_drv::Tps6699x<'a, M, B>) -> Self {
         Self {
             port_events: [const { Cell::new(PortEventKind::none()) }; N],
             port_status: [const { Cell::new(PortStatus::new()) }; N],
@@ -349,7 +349,9 @@ impl<const N: usize, M: RawMutex, B: I2c> FwUpdate for Tps6699x<'_, N, M, B> {
 
     async fn get_active_fw_version(&self) -> Result<u32, FwError<Self::BusError>> {
         let mut tps6699x = self.tps6699x.borrow_mut();
-        Ok(CustomerUse(tps6699x.get_customer_use().await.map_err(FwError::Bus)?).custom_fw_version())     
+        let customer_use = CustomerUse(tps6699x.get_customer_use().await.map_err(FwError::Bus)?);
+        info!("Active FW version: {:#X}", customer_use.custom_fw_version());
+        Ok(customer_use.custom_fw_version())     
     }
 
     async fn start_fw_update(&mut self) -> Result<(), FwError<Self::BusError>> {
