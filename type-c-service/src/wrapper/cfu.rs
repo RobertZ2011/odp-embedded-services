@@ -1,7 +1,6 @@
 //! CFU message bridge
 //! TODO: remove this once we have a more generic FW update implementation
 use embedded_services::fw_update::{FwUpdate as FwUpdateTrait, Error as FwError};
-use embedded_services::cfu::*;
 use embedded_services::cfu::component::*;
 use embedded_cfu_protocol::protocol_definitions::*;
 use embedded_services::type_c::controller::Controller;

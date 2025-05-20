@@ -15,9 +15,9 @@ use embedded_usb_pd::{GlobalPortId, PowerRole};
 
 use super::*;
 
-impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
+impl<const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'_, N, C> {
     /// Return the power device for the given port
-    pub(super) fn get_power_device(&self, port: LocalPortId) -> Result<&policy::device::Device, Error<C::BusError>> {
+    pub(super) fn get_power_device(&self, port: LocalPortId) -> Result<&policy::device::Device, Error<<C as Controller>::BusError>> {
         if port.0 > N as u8 {
             return PdError::InvalidPort.into();
         }
@@ -31,7 +31,7 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
         power: &policy::device::Device,
         port: LocalPortId,
         status: &PortStatus,
-    ) -> Result<(), Error<C::BusError>> {
+    ) -> Result<(), Error<<C as Controller>::BusError>> {
         info!("New consumer contract");
 
         if let Some(capability) = status.available_sink_contract {
@@ -93,7 +93,7 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
         port: GlobalPortId,
         power: &policy::device::Device,
         status: &PortStatus,
-    ) -> Result<(), Error<C::BusError>> {
+    ) -> Result<(), Error<<C as Controller>::BusError>> {
         if port.0 > N as u8 {
             return PdError::InvalidPort.into();
         }
@@ -144,7 +144,7 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
         port: LocalPortId,
         controller: &mut C,
         power: &policy::device::Device,
-    ) -> Result<(), Error<C::BusError>> {
+    ) -> Result<(), Error<<C as Controller>::BusError>> {
         let state = power.state().await.kind();
         if state == StateKind::ConnectedConsumer {
             info!("Port{}: Disconnect consumer", port.0);
@@ -179,7 +179,7 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
         port: LocalPortId,
         capability: PowerCapability,
         controller: &mut C,
-    ) -> Result<(), Error<C::BusError>> {
+    ) -> Result<(), Error<<C as Controller>::BusError>> {
         info!("Port{}: Connect provider: {:#?}", port.0, capability);
         let current = match capability {
             POWER_CAPABILITY_USB_DEFAULT_USB2 | POWER_CAPABILITY_USB_DEFAULT_USB3 => TypecCurrent::UsbDefault,
@@ -222,6 +222,11 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
         command: &CommandData,
     ) -> InternalResponseData {
         trace!("Processing power command: device{} {:#?}", port.0, command);
+        if self.fw_update {
+            debug!("Port{}: Firmware update in progress", port.0);
+            return Err(policy::Error::Busy);
+        }
+
         let power = match self.get_power_device(port) {
             Ok(power) => power,
             Err(_) => {

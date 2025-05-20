@@ -3,14 +3,17 @@
 use core::array::from_fn;
 use core::cell::{Cell, RefCell};
 
-use embassy_futures::select::{select3, select_array, Either3};
+use embassy_futures::select::{select4, select_array, Either4};
 use embedded_services::power::policy::device::StateKind;
 use embedded_services::power::policy::{self, action};
 use embedded_services::type_c::controller::{self, Controller, PortStatus};
 use embedded_services::type_c::event::{PortEventFlags, PortEventKind};
-use embedded_services::{error, info, trace, warn};
+use embedded_services::cfu::component::CfuDevice;
+use embedded_services::fw_update::{FwUpdate as FwUpdateTrait};
+use embedded_services::{error, info, debug, trace, warn};
 use embedded_usb_pd::{type_c::Current as TypecCurrent, Error, PdError, PortId as LocalPortId};
 
+mod cfu;
 mod pd;
 mod power;
 
@@ -22,21 +25,27 @@ const DUAL_ROLE_CONSUMER_THRESHOLD_MW: u32 = 15000;
 
 /// Takes an implementation of the `Controller` trait and wraps it with logic to handle
 /// message passing and power-policy integration.
-pub struct ControllerWrapper<'a, const N: usize, C: Controller> {
+pub struct ControllerWrapper<'a, const N: usize, C: Controller + FwUpdateTrait> {
     /// PD controller to interface with PD service
     pd_controller: controller::Device<'a>,
     /// Power policy devices to interface with power policy service
     power: [policy::device::Device; N],
+    /// CFU device to interface with firmware update service
+    cfu_device: CfuDevice,
+    /// If we're currently doing a firmware update
+    fw_update: bool,
     controller: RefCell<C>,
     active_events: [Cell<PortEventKind>; N],
 }
 
-impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
+impl<'a, const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'a, N, C> {
     /// Create a new controller wrapper
-    pub fn new(pd_controller: controller::Device<'a>, power: [policy::device::Device; N], controller: C) -> Self {
+    pub fn new(pd_controller: controller::Device<'a>, power: [policy::device::Device; N], cfu_device: CfuDevice, controller: C) -> Self {
         Self {
             pd_controller,
             power,
+            cfu_device,
+            fw_update: false,
             controller: RefCell::new(controller),
             active_events: [const { Cell::new(PortEventKind::none()) }; N],
         }
@@ -44,7 +53,7 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
 
     /// Ensure the software state is in sync with the hardware state
     #[allow(clippy::await_holding_refcell_ref)]
-    async fn sync_state(&self) -> Result<(), Error<C::BusError>> {
+    async fn sync_state(&self) -> Result<(), Error<<C as Controller>::BusError>> {
         let mut controller = self.controller.borrow_mut();
         controller.sync_state().await
     }
@@ -56,7 +65,7 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
         power: &policy::device::Device,
         port: LocalPortId,
         status: &PortStatus,
-    ) -> Result<(), Error<C::BusError>> {
+    ) -> Result<(), Error<<C as Controller>::BusError>> {
         if port.0 > N as u8 {
             error!("Invalid port {}", port.0);
             return PdError::InvalidPort.into();
@@ -117,6 +126,12 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
     /// None of the event processing functions return errors to allow processing to continue for other ports on a controller
     async fn process_event(&self, controller: &mut C) {
         let mut port_events = PortEventFlags::none();
+
+        if self.fw_update {
+            // Don't process events while firmware update is in progress
+            debug!("Firmware update in progress, ignoring port events");
+            return;
+        }
 
         for port in 0..N {
             let local_port_id = LocalPortId(port as u8);
@@ -201,32 +216,37 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
     #[allow(clippy::await_holding_refcell_ref)]
     pub async fn process(&self) {
         let mut controller = self.controller.borrow_mut();
-        match select3(
+        match select4(
             controller.wait_port_event(),
             self.wait_power_command(),
             self.pd_controller.receive(),
+            self.cfu_device.wait_request(),
         )
         .await
         {
-            Either3::First(r) => match r {
+            Either4::First(r) => match r {
                 Ok(_) => self.process_event(&mut controller).await,
                 Err(_) => error!("Error waiting for port event"),
             },
-            Either3::Second((request, port)) => {
+            Either4::Second((request, port)) => {
                 let response = self
                     .process_power_command(&mut controller, port, &request.command)
                     .await;
                 request.respond(response);
             }
-            Either3::Third(request) => {
+            Either4::Third(request) => {
                 let response = self.process_pd_command(&mut controller, &request.command).await;
                 request.respond(response);
+            }
+            Either4::Fourth(request) => {
+                let response = self.process_cfu_command(&mut controller, &request).await;
+                self.send_cfu_response(response).await;
             }
         }
     }
 
     /// Register all devices with their respective services
-    pub async fn register(&'static self) -> Result<(), Error<C::BusError>> {
+    pub async fn register(&'static self) -> Result<(), Error<<C as Controller>::BusError>> {
         for device in &self.power {
             policy::register_device(device).await.map_err(|_| {
                 error!(
@@ -247,6 +267,12 @@ impl<'a, const N: usize, C: Controller> ControllerWrapper<'a, N, C> {
                 );
                 Error::Pd(PdError::Failed)
             })?;
+
+        //TODO: Remove when we have a more general framework in place
+        embedded_services::cfu::register_device(&self.cfu_device).await.map_err(|_| {
+            error!("Controller{}: Failed to register CFU device", self.pd_controller.id().0);
+            Error::Pd(PdError::Failed)
+        })?;
 
         self.sync_state().await
     }

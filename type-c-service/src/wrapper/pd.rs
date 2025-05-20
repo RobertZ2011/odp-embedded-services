@@ -1,11 +1,18 @@
 use embedded_services::type_c::controller::{InternalResponseData, Response};
+use embedded_services::fw_update::{FwUpdate as FwUpdateTrait};
 use embedded_usb_pd::ucsi::lpm;
+use embedded_services::debug;
 
 use super::*;
 
-impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
+impl<const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'_, N, C> {
     /// Handle a port command
     async fn process_port_command(&self, controller: &mut C, command: &controller::PortCommand) -> Response<'static> {
+        if self.fw_update {
+            debug!("FW update in progress, ignoring port command");
+            return controller::Response::Port(Err(PdError::Busy));
+        }
+
         let local_port = self.pd_controller.lookup_local_port(command.port);
         if local_port.is_err() {
             return controller::Response::Port(Err(PdError::InvalidPort));
@@ -33,6 +40,11 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
         controller: &mut C,
         command: &controller::InternalCommandData,
     ) -> Response<'static> {
+        if self.fw_update {
+            debug!("FW update in progress, ignoring controller command");
+            return controller::Response::Controller(Err(PdError::Busy));
+        }
+
         match command {
             controller::InternalCommandData::Status => {
                 let status = controller.get_controller_status().await;
