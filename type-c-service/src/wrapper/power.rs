@@ -17,7 +17,10 @@ use super::*;
 
 impl<const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'_, N, C> {
     /// Return the power device for the given port
-    pub(super) fn get_power_device(&self, port: LocalPortId) -> Result<&policy::device::Device, Error<<C as Controller>::BusError>> {
+    pub(super) fn get_power_device(
+        &self,
+        port: LocalPortId,
+    ) -> Result<&policy::device::Device, Error<<C as Controller>::BusError>> {
         if port.0 > N as u8 {
             return PdError::InvalidPort.into();
         }
@@ -218,11 +221,12 @@ impl<const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'_, N, C> 
     pub(super) async fn process_power_command(
         &self,
         controller: &mut C,
+        state: &mut InternalState,
         port: LocalPortId,
         command: &CommandData,
     ) -> InternalResponseData {
         trace!("Processing power command: device{} {:#?}", port.0, command);
-        if self.fw_update {
+        if state.fw_update {
             debug!("Port{}: Firmware update in progress", port.0);
             return Err(policy::Error::Busy);
         }

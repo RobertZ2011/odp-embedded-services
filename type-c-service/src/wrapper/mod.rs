@@ -4,13 +4,13 @@ use core::array::from_fn;
 use core::cell::{Cell, RefCell};
 
 use embassy_futures::select::{select4, select_array, Either4};
+use embedded_services::cfu::component::CfuDevice;
+use embedded_services::fw_update::FwUpdate as FwUpdateTrait;
 use embedded_services::power::policy::device::StateKind;
 use embedded_services::power::policy::{self, action};
 use embedded_services::type_c::controller::{self, Controller, PortStatus};
 use embedded_services::type_c::event::{PortEventFlags, PortEventKind};
-use embedded_services::cfu::component::CfuDevice;
-use embedded_services::fw_update::{FwUpdate as FwUpdateTrait};
-use embedded_services::{error, info, debug, trace, warn};
+use embedded_services::{debug, error, info, trace, warn};
 use embedded_usb_pd::{type_c::Current as TypecCurrent, Error, PdError, PortId as LocalPortId};
 
 mod cfu;
@@ -23,6 +23,25 @@ const DEFAULT_SOURCE_CURRENT: TypecCurrent = TypecCurrent::Current1A5;
 /// This ensures we don't try to sink from something like a phone
 const DUAL_ROLE_CONSUMER_THRESHOLD_MW: u32 = 15000;
 
+/// Internal wrapper state
+pub struct InternalState {
+    /// If we're currently doing a firmware update
+    pub fw_update: bool,
+}
+
+impl InternalState {
+    /// Create a new internal state
+    pub const fn new() -> Self {
+        Self { fw_update: false }
+    }
+}
+
+impl Default for InternalState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Takes an implementation of the `Controller` trait and wraps it with logic to handle
 /// message passing and power-policy integration.
 pub struct ControllerWrapper<'a, const N: usize, C: Controller + FwUpdateTrait> {
@@ -32,20 +51,25 @@ pub struct ControllerWrapper<'a, const N: usize, C: Controller + FwUpdateTrait> 
     power: [policy::device::Device; N],
     /// CFU device to interface with firmware update service
     cfu_device: CfuDevice,
-    /// If we're currently doing a firmware update
-    fw_update: bool,
+    /// Internal state for the wrapper
+    state: RefCell<InternalState>,
     controller: RefCell<C>,
     active_events: [Cell<PortEventKind>; N],
 }
 
 impl<'a, const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'a, N, C> {
     /// Create a new controller wrapper
-    pub fn new(pd_controller: controller::Device<'a>, power: [policy::device::Device; N], cfu_device: CfuDevice, controller: C) -> Self {
+    pub fn new(
+        pd_controller: controller::Device<'a>,
+        power: [policy::device::Device; N],
+        cfu_device: CfuDevice,
+        controller: C,
+    ) -> Self {
         Self {
             pd_controller,
             power,
             cfu_device,
-            fw_update: false,
+            state: RefCell::new(InternalState::new()),
             controller: RefCell::new(controller),
             active_events: [const { Cell::new(PortEventKind::none()) }; N],
         }
@@ -124,10 +148,10 @@ impl<'a, const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'a, N,
 
     /// Process port events
     /// None of the event processing functions return errors to allow processing to continue for other ports on a controller
-    async fn process_event(&self, controller: &mut C) {
+    async fn process_event(&self, controller: &mut C, state: &mut InternalState) {
         let mut port_events = PortEventFlags::none();
 
-        if self.fw_update {
+        if state.fw_update {
             // Don't process events while firmware update is in progress
             debug!("Firmware update in progress, ignoring port events");
             return;
@@ -216,6 +240,7 @@ impl<'a, const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'a, N,
     #[allow(clippy::await_holding_refcell_ref)]
     pub async fn process(&self) {
         let mut controller = self.controller.borrow_mut();
+        let mut state = self.state.borrow_mut();
         match select4(
             controller.wait_port_event(),
             self.wait_power_command(),
@@ -225,21 +250,23 @@ impl<'a, const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'a, N,
         .await
         {
             Either4::First(r) => match r {
-                Ok(_) => self.process_event(&mut controller).await,
+                Ok(_) => self.process_event(&mut controller, &mut state).await,
                 Err(_) => error!("Error waiting for port event"),
             },
             Either4::Second((request, port)) => {
                 let response = self
-                    .process_power_command(&mut controller, port, &request.command)
+                    .process_power_command(&mut controller, &mut state, port, &request.command)
                     .await;
                 request.respond(response);
             }
             Either4::Third(request) => {
-                let response = self.process_pd_command(&mut controller, &request.command).await;
+                let response = self
+                    .process_pd_command(&mut controller, &mut state, &request.command)
+                    .await;
                 request.respond(response);
             }
             Either4::Fourth(request) => {
-                let response = self.process_cfu_command(&mut controller, &request).await;
+                let response = self.process_cfu_command(&mut controller, &mut state, &request).await;
                 self.send_cfu_response(response).await;
             }
         }
@@ -269,10 +296,12 @@ impl<'a, const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'a, N,
             })?;
 
         //TODO: Remove when we have a more general framework in place
-        embedded_services::cfu::register_device(&self.cfu_device).await.map_err(|_| {
-            error!("Controller{}: Failed to register CFU device", self.pd_controller.id().0);
-            Error::Pd(PdError::Failed)
-        })?;
+        embedded_services::cfu::register_device(&self.cfu_device)
+            .await
+            .map_err(|_| {
+                error!("Controller{}: Failed to register CFU device", self.pd_controller.id().0);
+                Error::Pd(PdError::Failed)
+            })?;
 
         self.sync_state().await
     }

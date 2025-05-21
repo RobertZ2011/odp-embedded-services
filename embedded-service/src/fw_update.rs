@@ -47,5 +47,9 @@ pub trait FwUpdate {
     fn finalize_fw_update(&mut self) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
 
     /// Supply firmware update contents
-    fn write_fw_contents(&mut self, offset: usize, data: &[u8]) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
+    fn write_fw_contents(
+        &mut self,
+        offset: usize,
+        data: &[u8],
+    ) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
 }

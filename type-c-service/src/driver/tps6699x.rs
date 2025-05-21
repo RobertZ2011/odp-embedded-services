@@ -10,32 +10,43 @@ use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Delay;
+use embedded_cfu_protocol::protocol_definitions::ComponentId;
 use embedded_hal_async::i2c::I2c;
+use embedded_services::cfu::component::CfuDevice;
+use embedded_services::fw_update::{Error as FwError, ErrorKind as FwErrorKind, FwUpdate};
 use embedded_services::power::policy::{self, PowerCapability};
 use embedded_services::type_c::controller::{self, Controller, ControllerStatus, PortStatus};
 use embedded_services::type_c::event::PortEventKind;
 use embedded_services::type_c::ControllerId;
-use embedded_services::cfu::component::{CfuDevice};
-use embedded_cfu_protocol::protocol_definitions::ComponentId;
-use embedded_services::{debug, info, trace, type_c};
-use embedded_services::fw_update::{FwUpdate, ErrorKind as FwErrorKind, Error as FwError};
+use embedded_services::{debug, info, trace, warn, type_c};
 use embedded_usb_pd::pdinfo::PowerPathStatus;
 use embedded_usb_pd::pdo::{sink, source, Common, Rdo};
 use embedded_usb_pd::type_c::Current as TypecCurrent;
 use embedded_usb_pd::{Error, GlobalPortId, PdError, PortId as LocalPortId, PowerRole};
-use tps6699x::asynchronous::fw_update::{BorrowedUpdater, BorrowedUpdaterInProgress};
 use tps6699x::asynchronous::embassy as tps6699x_drv;
+use tps6699x::asynchronous::fw_update::{BorrowedUpdater, BorrowedUpdaterInProgress, enable_port0_interrupts, disable_all_interrupts};
 
 type Updater<'a, M, B> = BorrowedUpdaterInProgress<1, tps6699x_drv::Tps6699x<'a, M, B>>;
 
 use crate::wrapper::ControllerWrapper;
+
+/// Firmware update state
+struct FwUpdateState<'a, M: RawMutex, B: I2c> {
+    /// Updater state
+    updater: Updater<'a, M, B>,
+    /// Interrupt guards to maintain during the update
+    ///
+    /// This value is never read, only used to keep the interrupt guard alive
+    #[allow(dead_code)]
+    guards: [tps6699x_drv::InterruptGuard<'a, M, B>; 1],
+}
 
 pub struct Tps6699x<'a, const N: usize, M: RawMutex, B: I2c> {
     port_events: [Cell<PortEventKind>; N],
     port_status: [Cell<PortStatus>; N],
     sw_event: Signal<M, ()>,
     tps6699x: RefCell<tps6699x_drv::Tps6699x<'a, M, B>>,
-    updater: RefCell<Option<Updater<'a, M, B>>>,
+    update_state: RefCell<Option<FwUpdateState<'a, M, B>>>,
 }
 
 impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
@@ -45,7 +56,7 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
             port_status: [const { Cell::new(PortStatus::new()) }; N],
             sw_event: Signal::new(),
             tps6699x: RefCell::new(tps6699x),
-            updater: RefCell::new(None),
+            update_state: RefCell::new(None),
         }
     }
 
@@ -160,7 +171,10 @@ impl<'a, const N: usize, M: RawMutex, B: I2c> Tps6699x<'a, N, M, B> {
     }
 
     /// Wait for an event on any port
-    async fn wait_interrupt_event(&self, tps6699x: &mut tps6699x_drv::Tps6699x<'a, M, B>) -> Result<(), Error<B::Error>> {
+    async fn wait_interrupt_event(
+        &self,
+        tps6699x: &mut tps6699x_drv::Tps6699x<'a, M, B>,
+    ) -> Result<(), Error<B::Error>> {
         let interrupts = tps6699x.wait_interrupt(false, |_, _| true).await;
 
         for (interrupt, cell) in zip(interrupts.iter(), self.port_events.iter()) {
@@ -352,7 +366,7 @@ impl<const N: usize, M: RawMutex, B: I2c> FwUpdate for Tps6699x<'_, N, M, B> {
     async fn get_active_fw_version(&self) -> Result<u32, FwError<Self::BusError>> {
         let mut tps6699x = self.tps6699x.borrow_mut();
         let customer_use = CustomerUse(tps6699x.get_customer_use().await.map_err(FwError::Bus)?);
-        Ok(customer_use.custom_fw_version())     
+        Ok(customer_use.custom_fw_version())
     }
 
     async fn start_fw_update(&mut self) -> Result<(), FwError<Self::BusError>> {
@@ -360,16 +374,34 @@ impl<const N: usize, M: RawMutex, B: I2c> FwUpdate for Tps6699x<'_, N, M, B> {
         let mut delay = Delay;
         let mut updater: BorrowedUpdater<1, tps6699x_drv::Tps6699x<'_, M, B>> = Default::default();
 
-        let in_progress = updater.start_fw_update(&mut [&mut tps6699x], &mut delay).await.map_err(FwError::Bus)?;
-        self.updater.replace(Some(in_progress));
+        // Abandon any previous in-progress update
+        if let Some(update) = self.update_state.replace(None) {
+            warn!("Abandoning in-progress update");
+            let mut delay = Delay;
+            update.updater.abort_fw_update(&mut [&mut tps6699x], &mut delay).await;
+        }
+
+        let _guards = disable_all_interrupts::<1, tps6699x_drv::Tps6699x<'_, M, B>>(&mut [&mut tps6699x]).await.map_err(FwError::Bus)?;
+        let in_progress = updater
+            .start_fw_update(&mut [&mut tps6699x], &mut delay)
+            .await
+            .map_err(FwError::Bus)?;
+        // Re-enable interrupts on port 0 only
+        let guards = enable_port0_interrupts::<1, tps6699x_drv::Tps6699x<'_, M, B>>(&mut [&mut tps6699x])
+            .await
+            .map_err(FwError::Bus)?;
+        self.update_state.replace(Some(FwUpdateState {
+            updater: in_progress,
+            guards,
+        }));
         Ok(())
     }
 
     async fn abort_fw_update(&mut self) -> Result<(), FwError<Self::BusError>> {
         let mut tps6699x = self.tps6699x.borrow_mut();
-        if let Some(updater) = self.updater.replace(None) {
+        if let Some(update) = self.update_state.replace(None) {
             let mut delay = Delay;
-            updater.abort_fw_update(&mut [&mut tps6699x], &mut delay).await;
+            update.updater.abort_fw_update(&mut [&mut tps6699x], &mut delay).await;
             Ok(())
         } else {
             Err(FwError::General(FwErrorKind::InvalidMode))
@@ -378,9 +410,13 @@ impl<const N: usize, M: RawMutex, B: I2c> FwUpdate for Tps6699x<'_, N, M, B> {
 
     async fn finalize_fw_update(&mut self) -> Result<(), FwError<Self::BusError>> {
         let mut tps6699x = self.tps6699x.borrow_mut();
-        if let Some(updater) = self.updater.replace(None) {
+        if let Some(update) = self.update_state.replace(None) {
             let mut delay = Delay;
-            updater.complete_fw_update(&mut [&mut tps6699x], &mut delay).await.map_err(FwError::Bus)?;
+            update
+                .updater
+                .complete_fw_update(&mut [&mut tps6699x], &mut delay)
+                .await
+                .map_err(FwError::Bus)?;
             Ok(())
         } else {
             Err(FwError::General(FwErrorKind::InvalidMode))
@@ -389,10 +425,13 @@ impl<const N: usize, M: RawMutex, B: I2c> FwUpdate for Tps6699x<'_, N, M, B> {
 
     async fn write_fw_contents(&mut self, _offset: usize, data: &[u8]) -> Result<(), FwError<Self::BusError>> {
         let mut tps6699x = self.tps6699x.borrow_mut();
-        let mut updater = self.updater.borrow_mut();
-        if let Some(updater) = updater.as_mut() {
+        let mut update_state = self.update_state.borrow_mut();
+        if let Some(update) = update_state.as_mut() {
             let mut delay = Delay;
-            updater.write_bytes(&mut [&mut tps6699x], &mut delay, data).await.map_err(FwError::Bus)?;
+            update.updater
+                .write_bytes(&mut [&mut tps6699x], &mut delay, data)
+                .await
+                .map_err(FwError::Bus)?;
             Ok(())
         } else {
             Err(FwError::General(FwErrorKind::InvalidMode))

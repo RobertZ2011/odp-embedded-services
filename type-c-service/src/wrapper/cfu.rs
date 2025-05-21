@@ -1,8 +1,8 @@
 //! CFU message bridge
 //! TODO: remove this once we have a more generic FW update implementation
-use embedded_services::fw_update::{FwUpdate as FwUpdateTrait, Error as FwError};
-use embedded_services::cfu::component::*;
 use embedded_cfu_protocol::protocol_definitions::*;
+use embedded_services::cfu::component::{RequestData, InternalResponseData};
+use embedded_services::fw_update::{Error as FwError, FwUpdate as FwUpdateTrait};
 use embedded_services::type_c::controller::Controller;
 use embedded_services::{debug, error};
 
@@ -23,20 +23,89 @@ impl<const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'_, N, C> 
             }
         };
 
-
         let dev_inf = FwVerComponentInfo::new(FwVersion::new(version), self.cfu_device.component_id());
         let comp_info: [FwVerComponentInfo; MAX_CMPT_COUNT] = [dev_inf; MAX_CMPT_COUNT];
         InternalResponseData::FwVersionResponse(GetFwVersionResponse {
-                    header: GetFwVersionResponseHeader::new(
-                        1,
-                        GetFwVerRespHeaderByte3::NoSpecialFlags,
-                    ),
-                    component_info: comp_info,
-                })
+            header: GetFwVersionResponseHeader::new(1, GetFwVerRespHeaderByte3::NoSpecialFlags),
+            component_info: comp_info,
+        })
+    }
+
+    /// Process a GiveOffer command
+    async fn process_give_offer(&self, offer: &FwUpdateOffer) -> Option<InternalResponseData> {
+        // accept any and all offers regardless of what version it is
+        if offer.component_info.component_id == self.cfu_device.component_id() {
+            debug!("Accepting offer");
+            Some(InternalResponseData::OfferResponse(FwUpdateOfferResponse::new_accept(
+                HostToken::Driver,
+            )))
+        } else {
+            debug!("Rejecting offer, ID mimismatch");
+            None
+        }
+    }
+
+    /// Process a GiveContent command
+    async fn process_give_content(
+        &self,
+        controller: &mut C,
+        state: &mut InternalState,
+        content: &FwUpdateContentCommand,
+    ) -> Option<InternalResponseData> {
+        let data = &content.data[0..content.header.data_length as usize];
+        if content.header.flags & FW_UPDATE_FLAG_FIRST_BLOCK != 0 {
+            debug!("Got first block");
+
+            // Need to start the update
+            if controller.start_fw_update().await.is_err() {
+                error!("Failed to start FW update");
+                return Some(InternalResponseData::ContentResponse(FwUpdateContentResponse::new(
+                    content.header.sequence_num,
+                    CfuUpdateContentResponseStatus::ErrorPrepare,
+                )));
+            }
+
+            state.fw_update = true;
+        }
+
+        if controller
+            .write_fw_contents(content.header.firmware_address as usize, data)
+            .await
+            .is_err()
+        {
+            error!("Failed to write block");
+            return Some(InternalResponseData::ContentResponse(FwUpdateContentResponse::new(
+                content.header.sequence_num,
+                CfuUpdateContentResponseStatus::ErrorWrite,
+            )));
+        }
+
+        Some(InternalResponseData::ContentResponse(FwUpdateContentResponse::new(
+            content.header.sequence_num,
+            CfuUpdateContentResponseStatus::Success,
+        )))
+    }
+
+    /// Process a FinalizeUpdate command
+    async fn process_finalize_update(
+        &self,
+        controller: &mut C,
+        state: &mut InternalState,
+    ) -> Option<InternalResponseData> {
+        if controller.finalize_fw_update().await.is_err() {
+            error!("Failed to finalize FW update");
+        }
+        state.fw_update = false;
+        None
     }
 
     /// Process a CFU command
-    pub async fn process_cfu_command(&self, controller: &mut C, command: &RequestData) -> Option<InternalResponseData> {
+    pub async fn process_cfu_command(
+        &self,
+        controller: &mut C,
+        state: &mut InternalState,
+        command: &RequestData,
+    ) -> Option<InternalResponseData> {
         match command {
             RequestData::FwVersionRequest => {
                 debug!("Got FwVersionRequest");
@@ -44,58 +113,27 @@ impl<const N: usize, C: Controller + FwUpdateTrait> ControllerWrapper<'_, N, C> 
             }
             RequestData::GiveOffer(offer) => {
                 debug!("Got GiveOffer");
-                // accept any and all offers regardless of what version it is
-                if offer.component_info.component_id == self.cfu_device.component_id() {
-                    debug!("Accepting offer");
-                    Some(InternalResponseData::OfferResponse(FwUpdateOfferResponse::new_accept(HostToken::Driver)))
-                } else {
-                    debug!("Rejecting offer, ID mimismatch");
-                    None
-                }
+                self.process_give_offer(offer).await
             }
             RequestData::GiveContent(content) => {
-               let data = &content.data[0..content.header.data_length as usize];
-               if content.header.flags & FW_UPDATE_FLAG_FIRST_BLOCK != 0 {
-                    debug!("Got first block");
-                    // Need to start the update
-                    if let Err(_) = controller.start_fw_update().await {
-                        error!("Failed to start FW update");
-                        Some(InternalResponseData::ContentResponse(FwUpdateContentResponse::new(content.header.sequence_num, CfuUpdateContentResponseStatus::ErrorPrepare)))
-                    } else {
-                        if let Err(_) = controller.write_fw_contents(content.header.firmware_address as usize, data).await {
-                            error!("Failed to write first block");
-                            Some(InternalResponseData::ContentResponse(FwUpdateContentResponse::new(content.header.sequence_num, CfuUpdateContentResponseStatus::ErrorWrite)))
-                        } else {
-                            Some(InternalResponseData::ContentResponse(FwUpdateContentResponse::new(content.header.sequence_num, CfuUpdateContentResponseStatus::Success)))
-                        }
-                    }
-               } else {
-                    debug!("Got last block");
-                     if let Err(_) = controller.write_fw_contents(content.header.firmware_address as usize, data).await {
-                            error!("Failed to write first block");
-                            Some(InternalResponseData::ContentResponse(FwUpdateContentResponse::new(content.header.sequence_num, CfuUpdateContentResponseStatus::ErrorWrite)))
-                        } else {
-                            Some(InternalResponseData::ContentResponse(FwUpdateContentResponse::new(content.header.sequence_num, CfuUpdateContentResponseStatus::Success)))
-                        }
-               }
+                debug!("Got GiveContent");
+                self.process_give_content(controller, state, content).await
             }
             RequestData::FinalizeUpdate => {
                 debug!("Got FinalizeUpdate");
-                if let Err(_) = controller.finalize_fw_update().await {
-                    error!("Failed to finalize FW update");
-                }
-                None
-            },
+                self.process_finalize_update(controller, state).await
+            }
             _ => {
                 debug!("Got other command: {:#?}", command);
                 None
-
             }
         }
     }
 
     /// Sends a CFU response to the command
     pub async fn send_cfu_response(&self, response: Option<InternalResponseData>) {
-        self.cfu_device.send_response(response.unwrap_or(InternalResponseData::ComponentPrepared)).await;
+        self.cfu_device
+            .send_response(response.unwrap_or(InternalResponseData::ComponentPrepared))
+            .await;
     }
 }

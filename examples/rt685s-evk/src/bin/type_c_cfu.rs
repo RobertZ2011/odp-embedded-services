@@ -182,4 +182,8 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(pd_controller_task(pd_controller));
 
     spawner.must_spawn(fw_update_task());
+
+    embassy_time::Timer::after_secs(10).await;
+    let status = type_c::external::get_controller_status(CONTROLLER0_ID).await;
+    info!("RPZ Controller status: {:?}", status);
 }
