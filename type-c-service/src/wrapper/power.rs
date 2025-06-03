@@ -143,11 +143,11 @@ impl<const N: usize, C: Controller> ControllerWrapper<'_, N, C> {
     ) -> Result<(), Error<C::BusError>> {
         let state = power.state().await.kind();
         if state == StateKind::ConnectedConsumer {
-            info!("Port{}: Disconnect consumer", port.0);
-            if controller.enable_sink_path(port, false).await.is_err() {
+            info!("Port{}: Disconnect consumer (disabled)", port.0);
+            /*if controller.enable_sink_path(port, false).await.is_err() {
                 error!("Error disabling sink path");
                 return PdError::Failed.into();
-            }
+            }*/
         }
 
         Ok(())
