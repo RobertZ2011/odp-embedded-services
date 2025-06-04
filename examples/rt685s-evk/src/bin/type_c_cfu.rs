@@ -25,6 +25,7 @@ use embedded_usb_pd::GlobalPortId;
 use static_cell::StaticCell;
 use tps6699x::asynchronous::embassy as tps6699x;
 use type_c_service::driver::tps6699x::{self as tps6699x_drv};
+use ::tps6699x::stream::SeekingStream;
 
 extern crate rt685s_evk_example;
 
@@ -98,8 +99,8 @@ async fn fw_update_task() {
         .unwrap();
     info!("Got response: {:?}", offer);
 
-    let fw = &[]; //include_bytes!("../../fw.bin");
-    let num_chunks = fw.len() / DEFAULT_DATA_LENGTH;
+    let fw = include_bytes!("../../pd-fw.bin");
+    let num_chunks = fw.len().div_ceil(DEFAULT_DATA_LENGTH);
 
     for (i, chunk) in fw.chunks(DEFAULT_DATA_LENGTH).enumerate() {
         let header = FwUpdateContentHeader {
@@ -122,7 +123,7 @@ async fn fw_update_task() {
             data: chunk_data,
         };
 
-        info!("Sending chunk {} of {}", i, fw.len());
+        info!("Sending chunk {} of {}", i + 1, num_chunks);
         let response = device
             .execute_device_request(RequestData::GiveContent(request))
             .await

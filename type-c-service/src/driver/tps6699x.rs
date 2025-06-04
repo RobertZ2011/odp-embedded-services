@@ -41,6 +41,9 @@ struct FwUpdateState<'a, M: RawMutex, B: I2c> {
     /// This value is never read, only used to keep the interrupt guard alive
     #[allow(dead_code)]
     guards: [Option<tps6699x_drv::InterruptGuard<'a, M, B>>; 2],
+
+    /// Skip stream
+    skip_stream: Option<tps6699x::stream::SeekingStream>,
 }
 
 pub struct Tps6699x<'a, const N: usize, M: RawMutex, B: I2c> {
@@ -414,6 +417,7 @@ impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
         self.update_state.replace(Some(FwUpdateState {
             updater: in_progress,
             guards,
+            skip_stream: Some(tps6699x::stream::SeekingStream::new(0, 0x66C)),
         }));
         Ok(())
     }
@@ -463,6 +467,19 @@ impl<const N: usize, M: RawMutex, B: I2c> Controller for Tps6699x<'_, N, M, B> {
         let mut tps6699x = self.tps6699x.borrow_mut();
         let mut update_state = self.update_state.borrow_mut();
         if let Some(update) = update_state.as_mut() {
+            let data = if let Some(ref mut stream) = update.skip_stream {
+                let data = stream.seek_bytes(data);
+                if !data.is_empty() {
+                    update.skip_stream = None;
+                    info!("First chunk found, {:#?}", data);
+                    data
+                } else {
+                    // Skip header chunks
+                    return Ok(());
+                }
+            } else {
+                data
+            };
             let mut delay = Delay;
             update
                 .updater
