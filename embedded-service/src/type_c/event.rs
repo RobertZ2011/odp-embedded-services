@@ -219,16 +219,6 @@ impl From<PortNotification> for PortEvent {
     }
 }
 
-/// Enum to contain all port event variants
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum PortEventVariant {
-    /// Port status change events
-    StatusChanged(PortStatusChanged),
-    /// Port notification events
-    Notification(PortNotification),
-}
-
 /// Bit vector type to store pending port events
 type PortPendingVec = BitArr!(for 32, in u32);
 
@@ -253,6 +243,13 @@ impl PortPending {
     /// Marks the given port as pending
     pub fn pend_port(&mut self, port: usize) {
         self.0.set(port, true);
+    }
+
+    /// Marks the indexes given by the iterator as pending
+    pub fn pend_ports<I: IntoIterator<Item = usize>>(&mut self, iter: I) {
+        for port in iter {
+            self.pend_port(port);
+        }
     }
 
     /// Clears the pending status of the given port
@@ -280,6 +277,14 @@ impl PortPending {
 impl From<PortPending> for u32 {
     fn from(flags: PortPending) -> Self {
         flags.0.data[0]
+    }
+}
+
+impl<I: Iterator<Item = usize>> From<I> for PortPending {
+    fn from(iter: I) -> Self {
+        let mut flags = PortPending::none();
+        flags.pend_ports(iter);
+        flags
     }
 }
 
@@ -317,12 +322,6 @@ impl IntoIterator for PortPending {
     }
 }
 
-impl From<PortPendingIter> for PortPending {
-    fn from(iter: PortPendingIter) -> Self {
-        iter.flags
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,20 +330,20 @@ mod tests {
     fn test_port_event_flags_iter() {
         let mut pending = PortPending::none();
 
-        pending.pend_port(GlobalPortId(0));
-        pending.pend_port(GlobalPortId(1));
-        pending.pend_port(GlobalPortId(2));
-        pending.pend_port(GlobalPortId(10));
-        pending.pend_port(GlobalPortId(23));
-        pending.pend_port(GlobalPortId(31));
+        pending.pend_port(0);
+        pending.pend_port(1);
+        pending.pend_port(2);
+        pending.pend_port(10);
+        pending.pend_port(23);
+        pending.pend_port(31);
 
         let mut iter = pending.into_iter();
-        assert_eq!(iter.next(), Some(GlobalPortId(0)));
-        assert_eq!(iter.next(), Some(GlobalPortId(1)));
-        assert_eq!(iter.next(), Some(GlobalPortId(2)));
-        assert_eq!(iter.next(), Some(GlobalPortId(10)));
-        assert_eq!(iter.next(), Some(GlobalPortId(23)));
-        assert_eq!(iter.next(), Some(GlobalPortId(31)));
+        assert_eq!(iter.next(), Some(0));
+        assert_eq!(iter.next(), Some(1));
+        assert_eq!(iter.next(), Some(2));
+        assert_eq!(iter.next(), Some(10));
+        assert_eq!(iter.next(), Some(23));
+        assert_eq!(iter.next(), Some(31));
         assert_eq!(iter.next(), None);
     }
 

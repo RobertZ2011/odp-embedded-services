@@ -155,7 +155,7 @@ impl<const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'_, N
             }
 
             // Need to start the update
-            state.fw_update_ticker.reset();
+            self.fw_update_ticker.lock().await.reset();
             match controller.start_fw_update().await {
                 Ok(_) => {
                     debug!("FW update started successfully");
@@ -330,7 +330,12 @@ impl<const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'_, N
                 Event::Request(self.cfu_device.wait_request().await)
             }
             FwUpdateState::InProgress(_) => {
-                match select(self.cfu_device.wait_request(), state.fw_update_ticker.next()).await {
+                match select(
+                    self.cfu_device.wait_request(),
+                    self.fw_update_ticker.lock().await.next(),
+                )
+                .await
+                {
                     Either::First(command) => Event::Request(command),
                     Either::Second(_) => {
                         debug!("FW update ticker ticked");
@@ -340,7 +345,7 @@ impl<const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'_, N
             }
             FwUpdateState::Recovery => {
                 // Recovery state, wait for the next attempt to recover the device
-                state.fw_update_ticker.next().await;
+                self.fw_update_ticker.lock().await.next().await;
                 debug!("FW update ticker ticked");
                 Event::RecoveryTick
             }

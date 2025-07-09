@@ -24,14 +24,14 @@ mod test_controller {
         GlobalRawMutex,
         type_c::{
             controller::{Contract, ControllerStatus, PortStatus, RetimerFwUpdateState},
-            event::PortEventKind,
+            event::PortEvent,
         },
     };
 
     use super::*;
 
     pub struct ControllerState {
-        events: Signal<GlobalRawMutex, PortEventKind>,
+        events: Signal<GlobalRawMutex, PortEvent>,
         status: Mutex<GlobalRawMutex, PortStatus>,
     }
 
@@ -47,9 +47,9 @@ mod test_controller {
         pub async fn connect(&self, _contract: Contract) {
             *self.status.lock().await = PortStatus::new();
 
-            let mut events = PortEventKind::none();
-            events.set_plug_inserted_or_removed(true);
-            events.set_new_power_contract_as_consumer(true);
+            let mut events = PortEvent::none();
+            events.status.set_plug_inserted_or_removed(true);
+            events.status.set_new_power_contract_as_consumer(true);
             self.events.signal(events);
         }
 
@@ -62,8 +62,8 @@ mod test_controller {
         pub async fn disconnect(&self) {
             *self.status.lock().await = PortStatus::default();
 
-            let mut events = PortEventKind::none();
-            events.set_plug_inserted_or_removed(true);
+            let mut events = PortEvent::none();
+            events.status.set_plug_inserted_or_removed(true);
             self.events.signal(events);
         }
 
@@ -71,23 +71,23 @@ mod test_controller {
         pub async fn connect_debug_accessory_source(&self, _current: Current) {
             *self.status.lock().await = PortStatus::new();
 
-            let mut events = PortEventKind::none();
-            events.set_plug_inserted_or_removed(true);
-            events.set_new_power_contract_as_consumer(true);
+            let mut events = PortEvent::none();
+            events.status.set_plug_inserted_or_removed(true);
+            events.status.set_new_power_contract_as_consumer(true);
             self.events.signal(events);
         }
     }
 
     pub struct Controller<'a> {
         state: &'a ControllerState,
-        events: Cell<PortEventKind>,
+        events: Cell<PortEvent>,
     }
 
     impl<'a> Controller<'a> {
         pub fn new(state: &'a ControllerState) -> Self {
             Self {
                 state,
-                events: Cell::new(PortEventKind::none()),
+                events: Cell::new(PortEvent::none()),
             }
         }
     }
@@ -107,10 +107,10 @@ mod test_controller {
             Ok(())
         }
 
-        async fn clear_port_events(&mut self, _port: LocalPortId) -> Result<PortEventKind, Error<Self::BusError>> {
+        async fn clear_port_events(&mut self, _port: LocalPortId) -> Result<PortEvent, Error<Self::BusError>> {
             let events = self.events.get();
             debug!("Clear port events: {events:#?}");
-            self.events.set(PortEventKind::none());
+            self.events.set(PortEvent::none());
             Ok(events)
         }
 
@@ -246,7 +246,9 @@ async fn controller_task(state: &'static test_controller::ControllerState) {
     wrapper.register().await.unwrap();
 
     loop {
-        wrapper.process().await;
+        if let Err(e) = wrapper.process().await {
+            error!("Error processing wrapper: {:?}", e);
+        }
     }
 }
 

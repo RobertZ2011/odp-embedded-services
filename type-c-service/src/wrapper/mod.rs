@@ -11,13 +11,13 @@ use embedded_services::ipc::deferred;
 use embedded_services::power::policy::device::StateKind;
 use embedded_services::power::policy::{self, action};
 use embedded_services::type_c::controller::{self, Controller, PortStatus};
-use embedded_services::type_c::event::{
-    PortEvent, PortNotification, PortNotificationSingle, PortPending, PortStatusChanged,
-};
+use embedded_services::type_c::event::{PortEvent, PortNotificationSingle, PortPending, PortStatusChanged};
 use embedded_services::GlobalRawMutex;
 use embedded_services::SyncCell;
 use embedded_services::{debug, error, info, trace, warn};
 use embedded_usb_pd::{Error, PdError, PortId as LocalPortId};
+
+use crate::{PortEventStreamer, PortEventVariant};
 
 mod cfu;
 mod pd;
@@ -33,20 +33,15 @@ pub const DEFAULT_FW_UPDATE_TIMEOUT_TICKS: u8 = 60;
 pub struct InternalState {
     /// If we're currently doing a firmware update
     pub fw_update_state: cfu::FwUpdateState,
-    /// FW update ticker used to check for timeouts and recovery attempts
-    fw_update_ticker: embassy_time::Ticker,
     /// State used to keep track of where we are as we turn the event bitfields into a stream of events
-    port_event_state: (usize, Option<PortNotification>),
+    port_event_streaming_state: Option<PortEventStreamer>,
 }
 
 impl Default for InternalState {
     fn default() -> Self {
         Self {
             fw_update_state: cfu::FwUpdateState::Idle,
-            fw_update_ticker: embassy_time::Ticker::every(embassy_time::Duration::from_millis(
-                DEFAULT_FW_UPDATE_TICK_INTERVAL_MS,
-            )),
-            port_event_state: (0, None),
+            port_event_streaming_state: None,
         }
     }
 }
@@ -90,6 +85,8 @@ pub struct ControllerWrapper<'a, const N: usize, C: Controller, V: FwOfferValida
     active_events: [SyncCell<PortEvent>; N],
     /// Trait object for validating firmware versions
     fw_version_validator: V,
+    /// FW update ticker used to check for timeouts and recovery attempts
+    fw_update_ticker: Mutex<GlobalRawMutex, embassy_time::Ticker>,
 }
 
 impl<'a, const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'a, N, C, V> {
@@ -109,6 +106,9 @@ impl<'a, const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'
             controller: Mutex::new(controller),
             active_events: [const { SyncCell::new(PortEvent::none()) }; N],
             fw_version_validator,
+            fw_update_ticker: Mutex::new(embassy_time::Ticker::every(embassy_time::Duration::from_millis(
+                DEFAULT_FW_UPDATE_TICK_INTERVAL_MS,
+            ))),
         }
     }
 
@@ -210,67 +210,26 @@ impl<'a, const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'
     }
 
     /// Wait for a pending port event
-    async fn wait_port_pending(&self, controller: &mut C) {
+    async fn wait_port_pending(
+        &self,
+        controller: &mut C,
+    ) -> Result<PortEventStreamer, Error<<C as Controller>::BusError>> {
         if self.state.lock().await.fw_update_state.in_progress() {
             // Don't process events while firmware update is in progress
             debug!("Firmware update in progress, ignoring port events");
             return future::pending().await;
         }
 
-        if self.state.lock().await.port_event_state == (0, None) {
-            // We aren't in the process of converting the bitfields into an event stream
-            // Wait for the next event
-            controller.wait_port_event().await;
-        } else {
+        if let Some(ref mut streamer) = self.state.lock().await.port_event_streaming_state {
             // If we're converting the bitfields into an event stream yield first to prevent starving other tasks
             embassy_futures::yield_now().await;
-        }
-    }
-
-    /// Handles the logic of converting port events into a stream of events
-    async fn stream_pending_port_events(
-        &self,
-        controller: &mut C,
-    ) -> Result<Option<Event<'_>>, Error<<C as Controller>::BusError>> {
-        let mut state = self.state.lock().await;
-        let (mut port_index, pending_notifications) = state.port_event_state;
-        let port_id = LocalPortId(port_index as u8);
-        if let Some(mut pending) = pending_notifications {
-            if let Some(port_event) = pending.next() {
-                // Return a single notification
-                state.port_event_state = (port_index, Some(pending));
-                return Ok(Some(Event::PortNotification(port_id, port_event)));
-            } else {
-                // No more pending notifications for this port, continue to the next port
-                port_index += 1;
-            }
+            Ok(*streamer)
         } else {
-            // Haven't read port events yet
-            let event = controller.clear_port_events(port_id).await?;
-
-            if event.notification != PortNotification::none() {
-                // Have pending notifications to stream as events, store those for the next call to this function
-                state.port_event_state = (port_index, Some(event.notification));
-            }
-
-            if event.status != PortStatusChanged::none() {
-                // Return the port status changed event first if there is one
-                return Ok(Some(Event::PortStatusChanged(port_id, event.status)));
-            } else if event.notification == PortNotification::none() {
-                // No events for this port, continue to the next port
-                port_index += 1;
-            }
+            // We aren't in the process of converting the bitfields into an event stream
+            // Wait for the next event
+            controller.wait_port_event().await?;
+            Ok(PortEventStreamer::new(Into::<PortPending>::into(0..N).into_iter()))
         }
-
-        if port_index >= N {
-            // No more ports to process, wait for the next event
-            state.port_event_state = (0, None);
-        } else {
-            // No events for this port, continue to the next port
-            state.port_event_state = (port_index, None);
-        }
-
-        Ok(None)
     }
 
     pub async fn wait_next(&self) -> Result<Event<'_>, Error<<C as Controller>::BusError>> {
@@ -284,12 +243,33 @@ impl<'a, const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'
             )
             .await
             {
-                Either4::First(_pending) => {
-                    if let Some(event) = self.stream_pending_port_events(&mut controller).await? {
-                        return Ok(event);
+                Either4::First(stream) => {
+                    let mut stream = stream?;
+                    if let Some((port_id, event)) = stream
+                        .next(async |port_id| {
+                            self.controller
+                                .lock()
+                                .await
+                                .clear_port_events(LocalPortId(port_id as u8))
+                                .await
+                        })
+                        .await?
+                    {
+                        let port_id = LocalPortId(port_id as u8);
+                        self.state.lock().await.port_event_streaming_state = Some(stream);
+                        match event {
+                            PortEventVariant::StatusChanged(status_event) => {
+                                // Return a port status changed event
+                                return Ok(Event::PortStatusChanged(port_id, status_event));
+                            }
+                            PortEventVariant::Notification(notification) => {
+                                // Return a port notification event
+                                return Ok(Event::PortNotification(port_id, notification));
+                            }
+                        }
+                    } else {
+                        self.state.lock().await.port_event_streaming_state = None;
                     }
-                    // If we didn't get an event, wait for the next port event
-                    continue;
                 }
                 Either4::Second((port, request)) => return Ok(Event::PowerPolicyCommand(port, request)),
                 Either4::Third(request) => return Ok(Event::ControllerCommand(request)),
@@ -338,6 +318,14 @@ impl<'a, const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'
                 // Nop for us
                 Ok(())
             }
+        }
+    }
+
+    /// Combined processing function
+    pub async fn process(&self) -> Result<(), Error<<C as Controller>::BusError>> {
+        loop {
+            let event = self.wait_next().await?;
+            self.process_event(event).await?;
         }
     }
 
