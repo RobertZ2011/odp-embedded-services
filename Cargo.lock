@@ -1481,6 +1481,7 @@ dependencies = [
  "embedded-services",
  "embedded-usb-pd",
  "log",
+ "tokio",
  "tps6699x",
 ]
 
