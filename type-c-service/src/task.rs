@@ -8,7 +8,7 @@ use embedded_services::{
     type_c::{
         self,
         controller::PortStatus,
-        event::{PortEventFlagsIter, PortEventKind},
+        event::{PortPendingIter, PortStatusChanged},
         external::{self, ControllerCommandData},
         ControllerId,
     },
@@ -25,7 +25,7 @@ struct State {
     /// Current port status
     port_status: [PortStatus; MAX_SUPPORTED_PORTS],
     /// Next port to check, this is used to round-robin through ports
-    event_iter: Option<PortEventFlagsIter>,
+    event_iter: Option<PortPendingIter>,
 }
 
 /// Type-C service
@@ -40,7 +40,7 @@ pub struct Service {
 
 pub enum Event<'a> {
     /// Port event
-    PortEvent(GlobalPortId, PortEventKind, PortStatus),
+    PortEvent(GlobalPortId, PortStatusChanged, PortStatus),
     /// External command
     ExternalCommand(deferred::Request<'a, GlobalRawMutex, external::Command, external::Response<'static>>),
 }
@@ -80,7 +80,7 @@ impl Service {
     async fn process_port_event(
         &self,
         port_id: GlobalPortId,
-        event: PortEventKind,
+        event: PortStatusChanged,
         status: PortStatus,
     ) -> Result<(), Error> {
         let old_status = self.get_cached_port_status(port_id).await?;
@@ -219,7 +219,7 @@ impl Service {
     }
 
     /// Wait for port flags
-    async fn wait_port_flags(&self) -> PortEventFlagsIter {
+    async fn wait_port_flags(&self) -> PortPendingIter {
         let mut state = self.state.lock().await;
         if state.event_iter.is_some() {
             // If we have an existing iterator, return it
@@ -237,7 +237,8 @@ impl Service {
             match select(self.wait_port_flags(), self.context.wait_external_command()).await {
                 Either::First(mut pending) => {
                     let mut state = self.state.lock().await;
-                    if let Some(port_id) = pending.next() {
+                    if let Some(port_index) = pending.next() {
+                        let port_id = GlobalPortId(port_index as u8);
                         debug!("Port{}: Event", port_id.0);
                         state.event_iter = Some(pending);
                         let event = self.context.get_port_event(port_id).await?;

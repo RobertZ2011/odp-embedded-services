@@ -1,15 +1,19 @@
 //! This module contains the `Controller` trait. Any types that implement this trait can be used with the `ControllerWrapper` struct
 //! which provides a bridge between various service messages and the actual controller functions.
 use core::array::from_fn;
+use core::future;
 
 use embassy_futures::select::{select4, select_array, Either4};
 use embassy_sync::mutex::Mutex;
 use embedded_cfu_protocol::protocol_definitions::{FwUpdateOffer, FwUpdateOfferResponse, FwVersion};
 use embedded_services::cfu::component::CfuDevice;
+use embedded_services::ipc::deferred;
 use embedded_services::power::policy::device::StateKind;
 use embedded_services::power::policy::{self, action};
 use embedded_services::type_c::controller::{self, Controller, PortStatus};
-use embedded_services::type_c::event::{PortEventFlags, PortEventKind};
+use embedded_services::type_c::event::{
+    PortEvent, PortNotification, PortNotificationSingle, PortPending, PortStatusChanged,
+};
 use embedded_services::GlobalRawMutex;
 use embedded_services::SyncCell;
 use embedded_services::{debug, error, info, trace, warn};
@@ -31,6 +35,8 @@ pub struct InternalState {
     pub fw_update_state: cfu::FwUpdateState,
     /// FW update ticker used to check for timeouts and recovery attempts
     fw_update_ticker: embassy_time::Ticker,
+    /// State used to keep track of where we are as we turn the event bitfields into a stream of events
+    port_event_state: (usize, Option<PortNotification>),
 }
 
 impl Default for InternalState {
@@ -40,6 +46,7 @@ impl Default for InternalState {
             fw_update_ticker: embassy_time::Ticker::every(embassy_time::Duration::from_millis(
                 DEFAULT_FW_UPDATE_TICK_INTERVAL_MS,
             )),
+            port_event_state: (0, None),
         }
     }
 }
@@ -50,6 +57,22 @@ impl Default for InternalState {
 pub trait FwOfferValidator {
     /// Determine if we are accepting the firmware update offer, returns a CFU offer response
     fn validate(&self, current: FwVersion, offer: &FwUpdateOffer) -> FwUpdateOfferResponse;
+}
+
+/// Wrapper events
+pub enum Event<'a> {
+    /// Port status changed
+    PortStatusChanged(LocalPortId, PortStatusChanged),
+    /// Port notification received
+    PortNotification(LocalPortId, PortNotificationSingle),
+    /// Power policy command received
+    PowerPolicyCommand(
+        LocalPortId,
+        deferred::Request<'a, GlobalRawMutex, policy::device::CommandData, policy::device::InternalResponseData>,
+    ),
+    /// Command from TCPM
+    ControllerCommand(deferred::Request<'a, GlobalRawMutex, controller::Command, controller::Response<'static>>),
+    CfuEvent(cfu::Event),
 }
 
 /// Takes an implementation of the `Controller` trait and wraps it with logic to handle
@@ -64,7 +87,7 @@ pub struct ControllerWrapper<'a, const N: usize, C: Controller, V: FwOfferValida
     /// Internal state for the wrapper
     state: Mutex<GlobalRawMutex, InternalState>,
     controller: Mutex<GlobalRawMutex, C>,
-    active_events: [SyncCell<PortEventKind>; N],
+    active_events: [SyncCell<PortEvent>; N],
     /// Trait object for validating firmware versions
     fw_version_validator: V,
 }
@@ -84,7 +107,7 @@ impl<'a, const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'
             cfu_device,
             state: Mutex::new(Default::default()),
             controller: Mutex::new(controller),
-            active_events: [const { SyncCell::new(PortEventKind::none()) }; N],
+            active_events: [const { SyncCell::new(PortEvent::none()) }; N],
             fw_version_validator,
         }
     }
@@ -136,136 +159,185 @@ impl<'a, const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'
         Ok(())
     }
 
-    /// Process port events
-    /// None of the event processing functions return errors to allow processing to continue for other ports on a controller
-    async fn process_event(&self, controller: &mut C, state: &mut InternalState) {
-        let mut port_events = PortEventFlags::none();
+    /// Process port status changed events
+    async fn process_port_status_changed(
+        &self,
+        controller: &mut C,
+        local_port_id: LocalPortId,
+        status_event: PortStatusChanged,
+    ) -> Result<(), Error<<C as Controller>::BusError>> {
+        let port_index = local_port_id.0 as usize;
+        let mut event = self.active_events[port_index].get();
+        let global_port_id = self
+            .pd_controller
+            .lookup_global_port(local_port_id)
+            .map_err(Error::Pd)?;
 
-        if state.fw_update_state.in_progress() {
+        if status_event == PortStatusChanged::none() {
+            event.status = PortStatusChanged::none();
+            self.active_events[port_index].set(event);
+            return Ok(());
+        }
+
+        let status = controller.get_port_status(local_port_id).await?;
+        trace!("Port{} status: {:#?}", global_port_id.0, status);
+
+        let power = self.get_power_device(local_port_id)?;
+        trace!("Port{} Interrupt: {:#?}", global_port_id.0, status_event);
+        if status_event.plug_inserted_or_removed() {
+            self.process_plug_event(controller, power, local_port_id, &status)
+                .await?;
+        }
+
+        // Only notify power policy of a contract after Sink Ready event (always after explicit or implicit contract)
+        if status_event.sink_ready() {
+            self.process_new_consumer_contract(controller, power, local_port_id, &status)
+                .await?;
+        }
+
+        if status_event.new_power_contract_as_provider() {
+            self.process_new_provider_contract(global_port_id, power, &status)
+                .await?;
+        }
+
+        self.active_events[port_index].set(event.union(status_event.into()));
+
+        let mut pending = PortPending::none();
+        pending.pend_port(port_index);
+        self.pd_controller.notify_ports(pending).await;
+
+        Ok(())
+    }
+
+    /// Wait for a pending port event
+    async fn wait_port_pending(&self, controller: &mut C) {
+        if self.state.lock().await.fw_update_state.in_progress() {
             // Don't process events while firmware update is in progress
             debug!("Firmware update in progress, ignoring port events");
-            return;
+            return future::pending().await;
         }
 
-        for port in 0..N {
-            let local_port_id = LocalPortId(port as u8);
-            let global_port_id = match self.pd_controller.lookup_global_port(local_port_id) {
-                Ok(port) => port,
-                Err(_) => {
-                    error!("Invalid local port {}", local_port_id.0);
-                    continue;
-                }
-            };
+        if self.state.lock().await.port_event_state == (0, None) {
+            // We aren't in the process of converting the bitfields into an event stream
+            // Wait for the next event
+            controller.wait_port_event().await;
+        } else {
+            // If we're converting the bitfields into an event stream yield first to prevent starving other tasks
+            embassy_futures::yield_now().await;
+        }
+    }
 
-            let event = match controller.clear_port_events(local_port_id).await {
-                Ok(event) => event,
-                Err(_) => {
-                    error!("Error clearing port events",);
-                    continue;
-                }
-            };
+    /// Handles the logic of converting port events into a stream of events
+    async fn stream_pending_port_events(
+        &self,
+        controller: &mut C,
+    ) -> Result<Option<Event<'_>>, Error<<C as Controller>::BusError>> {
+        let mut state = self.state.lock().await;
+        let (mut port_index, pending_notifications) = state.port_event_state;
+        let port_id = LocalPortId(port_index as u8);
+        if let Some(mut pending) = pending_notifications {
+            if let Some(port_event) = pending.next() {
+                // Return a single notification
+                state.port_event_state = (port_index, Some(pending));
+                return Ok(Some(Event::PortNotification(port_id, port_event)));
+            } else {
+                // No more pending notifications for this port, continue to the next port
+                port_index += 1;
+            }
+        } else {
+            // Haven't read port events yet
+            let event = controller.clear_port_events(port_id).await?;
 
-            if event == PortEventKind::none() {
-                self.active_events[port].set(PortEventKind::none());
-                continue;
+            if event.notification != PortNotification::none() {
+                // Have pending notifications to stream as events, store those for the next call to this function
+                state.port_event_state = (port_index, Some(event.notification));
             }
 
-            port_events.pend_port(global_port_id);
-
-            let status = match controller.get_port_status(local_port_id).await {
-                Ok(status) => status,
-                Err(_) => {
-                    error!("Port{}: Error getting port status", global_port_id.0);
-                    continue;
-                }
-            };
-            trace!("Port{} status: {:#?}", port, status);
-
-            let power = match self.get_power_device(local_port_id) {
-                Ok(power) => power,
-                Err(_) => {
-                    error!("Port{}: Error getting power device", global_port_id.0);
-                    continue;
-                }
-            };
-
-            trace!("Port{} Interrupt: {:#?}", global_port_id.0, event);
-            if event.plug_inserted_or_removed()
-                && self
-                    .process_plug_event(controller, power, local_port_id, &status)
-                    .await
-                    .is_err()
-            {
-                error!("Port{}: Error processing plug event", global_port_id.0);
-                continue;
+            if event.status != PortStatusChanged::none() {
+                // Return the port status changed event first if there is one
+                return Ok(Some(Event::PortStatusChanged(port_id, event.status)));
+            } else if event.notification == PortNotification::none() {
+                // No events for this port, continue to the next port
+                port_index += 1;
             }
-
-            // Only notify power policy of a contract after Sink Ready event (always after explicit or implicit contract)
-            if event.sink_ready()
-                && self
-                    .process_new_consumer_contract(controller, power, local_port_id, &status)
-                    .await
-                    .is_err()
-            {
-                error!("Port{}: Error processing new consumer contract", global_port_id.0);
-                continue;
-            }
-
-            if event.new_power_contract_as_provider()
-                && self
-                    .process_new_provider_contract(global_port_id, power, &status)
-                    .await
-                    .is_err()
-            {
-                error!("Port{}: Error processing new provider contract", global_port_id.0);
-                continue;
-            }
-
-            self.active_events[port].set(event);
         }
 
-        self.pd_controller.notify_ports(port_events).await;
+        if port_index >= N {
+            // No more ports to process, wait for the next event
+            state.port_event_state = (0, None);
+        } else {
+            // No events for this port, continue to the next port
+            state.port_event_state = (port_index, None);
+        }
+
+        Ok(None)
+    }
+
+    pub async fn wait_next(&self) -> Result<Event<'_>, Error<<C as Controller>::BusError>> {
+        loop {
+            let mut controller = self.controller.lock().await;
+            match select4(
+                self.wait_port_pending(&mut controller),
+                self.wait_power_command(),
+                self.pd_controller.receive(),
+                self.wait_cfu_command(),
+            )
+            .await
+            {
+                Either4::First(_pending) => {
+                    if let Some(event) = self.stream_pending_port_events(&mut controller).await? {
+                        return Ok(event);
+                    }
+                    // If we didn't get an event, wait for the next port event
+                    continue;
+                }
+                Either4::Second((port, request)) => return Ok(Event::PowerPolicyCommand(port, request)),
+                Either4::Third(request) => return Ok(Event::ControllerCommand(request)),
+                Either4::Fourth(event) => return Ok(Event::CfuEvent(event)),
+            }
+        }
     }
 
     /// Top-level processing function
     /// Only call this fn from one place in a loop. Otherwise a deadlock could occur.
-    pub async fn process(&self) {
+    pub async fn process_event(&self, event: Event<'_>) -> Result<(), Error<<C as Controller>::BusError>> {
         let mut controller = self.controller.lock().await;
         let mut state = self.state.lock().await;
-        match select4(
-            controller.wait_port_event(),
-            self.wait_power_command(),
-            self.pd_controller.receive(),
-            self.wait_cfu_command(&mut state),
-        )
-        .await
-        {
-            Either4::First(r) => match r {
-                Ok(_) => self.process_event(&mut controller, &mut state).await,
-                Err(_) => error!("Error waiting for port event"),
-            },
-            Either4::Second((request, port)) => {
+        match event {
+            Event::PortStatusChanged(port_id, status_event) => {
+                self.process_port_status_changed(&mut controller, port_id, status_event)
+                    .await
+            }
+            Event::PowerPolicyCommand(port, request) => {
                 let response = self
                     .process_power_command(&mut controller, &mut state, port, &request.command)
                     .await;
                 request.respond(response);
+                Ok(())
             }
-            Either4::Third(request) => {
+            Event::ControllerCommand(request) => {
                 let response = self
                     .process_pd_command(&mut controller, &mut state, &request.command)
                     .await;
                 request.respond(response);
+                Ok(())
             }
-            Either4::Fourth(request) => match request {
-                Some(request) => {
+            Event::CfuEvent(event) => match event {
+                cfu::Event::Request(request) => {
                     let response = self.process_cfu_command(&mut controller, &mut state, &request).await;
                     self.send_cfu_response(response).await;
+                    Ok(())
                 }
-                None => {
+                cfu::Event::RecoveryTick => {
                     // FW Update tick, process timeouts and recovery attempts
                     self.process_cfu_tick(&mut controller, &mut state).await;
+                    Ok(())
                 }
             },
+            Event::PortNotification(_, _) => {
+                // Nop for us
+                Ok(())
+            }
         }
     }
 
