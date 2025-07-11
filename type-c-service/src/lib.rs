@@ -20,7 +20,7 @@ pub enum PortEventVariant {
     Notification(PortNotificationSingle),
 }
 
-/// Iterator to contain state for iterating over all pending port events
+/// Struct to convert port events into a stream of events
 #[derive(Clone, Copy)]
 pub struct PortEventStreamer {
     /// Current port index being processed
@@ -28,7 +28,7 @@ pub struct PortEventStreamer {
     /// Iterator over pending ports
     pending_iter: PortPendingIter,
     /// Notification to be streamed
-    pending_notifitications: Option<PortNotification>,
+    pending_notifications: Option<PortNotification>,
 }
 
 impl PortEventStreamer {
@@ -39,7 +39,7 @@ impl PortEventStreamer {
         Self {
             port_index: None,
             pending_iter,
-            pending_notifitications: None,
+            pending_notifications: None,
         }
     }
 }
@@ -50,48 +50,47 @@ impl PortEventStreamer {
         &mut self,
         mut f: F,
     ) -> Result<Option<(usize, PortEventVariant)>, E> {
-        let port_index = if let Some(index) = self.port_index {
-            index
-        } else if let Some(next_port) = self.pending_iter.next() {
-            // Start with the first pending port
-            self.port_index = Some(next_port as usize);
-            next_port as usize
-        } else {
-            // No pending ports to process
-            return Ok(None);
-        };
-
         loop {
+            let port_index = if let Some(index) = self.port_index {
+                index
+            } else if let Some(next_port) = self.pending_iter.next() {
+                // Do some initialization if we haven't started processing any ports yet
+                self.port_index = Some(next_port);
+                next_port
+            } else {
+                // No pending ports to process
+                return Ok(None);
+            };
+
             let mut advance_port = false;
             let mut ret = None;
 
-            if let Some(mut pending) = self.pending_notifitications {
+            if let Some(mut pending) = self.pending_notifications {
                 if let Some(port_event) = pending.next() {
                     // Return a single notification
-                    self.pending_notifitications = Some(pending);
+                    self.pending_notifications = Some(pending);
                     ret = Some((port_index, PortEventVariant::Notification(port_event)));
                 } else {
                     // Done with pending notifications, continue to the next port
                     advance_port = true;
+                    self.pending_notifications = None;
                 }
             } else {
                 // Haven't read port events yet
                 let event = f(port_index).await?;
 
                 if event.notification != PortNotification::none() {
-                    // Have pending notifications to stream as events, store those for the next call to this function
-                    self.pending_notifitications = Some(event.notification);
+                    // Have pending notifications to stream as events, store those for the next loop/call to this function
+                    self.pending_notifications = Some(event.notification);
                 } else {
-                    // No events for this port, continue to the next port
+                    // No pending notifications, we can advance to the next port
                     advance_port = true;
-                    self.pending_notifitications = None;
+                    self.pending_notifications = None;
                 }
 
                 if event.status != PortStatusChanged::none() {
                     // Return the port status changed event first if there is one
                     ret = Some((port_index, PortEventVariant::StatusChanged(event.status)));
-                } else if event.notification == PortNotification::none() {
-                    advance_port = true;
                 }
             }
 
@@ -99,10 +98,15 @@ impl PortEventStreamer {
                 if let Some(next_port) = self.pending_iter.next() {
                     // Move to the next port
                     self.port_index = Some(next_port);
-                    self.pending_notifitications = None;
+                    self.pending_notifications = None;
+                } else if ret.is_none() {
+                    // Don't have any more ports to process
+                    // And we didn't have any events to return, we're done
+                    return Ok(None);
                 }
             }
 
+            // Return the event if we have one, otherwise loop to get the next event
             if let Some(ret) = ret {
                 return Ok(Some(ret));
             }
@@ -149,7 +153,7 @@ mod tests {
         assert_eq!(
             event,
             Ok(Some((
-                LocalPortId(0),
+                0,
                 PortEventVariant::StatusChanged(status_changed(true, true, true))
             )))
         );
@@ -160,7 +164,7 @@ mod tests {
         assert_eq!(
             event,
             Ok(Some((
-                LocalPortId(2),
+                2,
                 PortEventVariant::StatusChanged(status_changed(true, false, true))
             )))
         );
@@ -171,7 +175,7 @@ mod tests {
         assert_eq!(
             event,
             Ok(Some((
-                LocalPortId(3),
+                3,
                 PortEventVariant::StatusChanged(status_changed(false, false, true))
             )))
         );
@@ -189,10 +193,7 @@ mod tests {
             .await;
         assert_eq!(
             event,
-            Ok(Some((
-                LocalPortId(0),
-                PortEventVariant::Notification(PortNotificationSingle::Alert)
-            )))
+            Ok(Some((0, PortEventVariant::Notification(PortNotificationSingle::Alert))))
         );
 
         let event = streamer
@@ -200,10 +201,7 @@ mod tests {
             .await;
         assert_eq!(
             event,
-            Ok(Some((
-                LocalPortId(0),
-                PortEventVariant::Notification(PortNotificationSingle::Vdm)
-            )))
+            Ok(Some((0, PortEventVariant::Notification(PortNotificationSingle::Vdm))))
         );
     }
 
@@ -226,7 +224,7 @@ mod tests {
         assert_eq!(
             event,
             Ok(Some((
-                LocalPortId(0),
+                0,
                 PortEventVariant::StatusChanged(status_changed(true, true, true))
             )))
         );
@@ -234,10 +232,7 @@ mod tests {
         let event = streamer.next::<(), _, _>(async |_| Ok(p0_event)).await;
         assert_eq!(
             event,
-            Ok(Some((
-                LocalPortId(0),
-                PortEventVariant::Notification(PortNotificationSingle::Alert)
-            )))
+            Ok(Some((0, PortEventVariant::Notification(PortNotificationSingle::Alert))))
         );
 
         // Test p6 events
@@ -250,7 +245,7 @@ mod tests {
         assert_eq!(
             event,
             Ok(Some((
-                LocalPortId(6),
+                6,
                 PortEventVariant::StatusChanged(status_changed(false, true, false))
             )))
         );
@@ -258,13 +253,11 @@ mod tests {
         let event = streamer.next::<(), _, _>(async |_| Ok(p6_event)).await;
         assert_eq!(
             event,
-            Ok(Some((
-                LocalPortId(6),
-                PortEventVariant::Notification(PortNotificationSingle::Vdm)
-            )))
+            Ok(Some((6, PortEventVariant::Notification(PortNotificationSingle::Vdm))))
         );
     }
 
+    /// Test no pending ports
     #[tokio::test]
     async fn test_no_pending_ports() {
         let pending_ports = PortPending::none();
@@ -272,6 +265,17 @@ mod tests {
         let event = streamer
             .next::<(), _, _>(async |_| Ok(status_changed(true, true, true).into()))
             .await;
+        assert_eq!(event, Ok(None));
+    }
+
+    /// Test a port with a pending event with no actual event
+    #[tokio::test]
+    async fn test_empty_event() {
+        let mut pending_ports = PortPending::none();
+        pending_ports.pend_port(0);
+
+        let mut streamer = PortEventStreamer::new(pending_ports.into_iter());
+        let event = streamer.next::<(), _, _>(async |_| Ok(PortEvent::none())).await;
         assert_eq!(event, Ok(None));
     }
 }

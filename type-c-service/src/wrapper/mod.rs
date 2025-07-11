@@ -183,7 +183,7 @@ impl<'a, const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'
         trace!("Port{} status: {:#?}", global_port_id.0, status);
 
         let power = self.get_power_device(local_port_id)?;
-        trace!("Port{} Interrupt: {:#?}", global_port_id.0, status_event);
+        trace!("Port{} status events: {:#?}", global_port_id.0, status_event);
         if status_event.plug_inserted_or_removed() {
             self.process_plug_event(controller, power, local_port_id, &status)
                 .await?;
@@ -234,24 +234,24 @@ impl<'a, const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'
 
     pub async fn wait_next(&self) -> Result<Event<'_>, Error<<C as Controller>::BusError>> {
         loop {
-            let mut controller = self.controller.lock().await;
-            match select4(
-                self.wait_port_pending(&mut controller),
-                self.wait_power_command(),
-                self.pd_controller.receive(),
-                self.wait_cfu_command(),
-            )
-            .await
-            {
+            let event = {
+                let mut controller = self.controller.lock().await;
+                select4(
+                    self.wait_port_pending(&mut controller),
+                    self.wait_power_command(),
+                    self.pd_controller.receive(),
+                    self.wait_cfu_command(),
+                )
+                .await
+            };
+            match event {
                 Either4::First(stream) => {
                     let mut stream = stream?;
                     if let Some((port_id, event)) = stream
                         .next(async |port_id| {
-                            self.controller
-                                .lock()
-                                .await
-                                .clear_port_events(LocalPortId(port_id as u8))
-                                .await
+                            let mut controller = self.controller.lock().await;
+                            let ret = controller.clear_port_events(LocalPortId(port_id as u8)).await;
+                            ret
                         })
                         .await?
                     {
