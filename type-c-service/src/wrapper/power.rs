@@ -13,7 +13,7 @@ use super::*;
 
 impl<const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'_, N, C, V> {
     /// Return the power device for the given port
-    pub(super) fn get_power_device(
+    pub fn get_power_device(
         &self,
         port: LocalPortId,
     ) -> Result<&policy::device::Device, Error<<C as Controller>::BusError>> {
@@ -21,6 +21,11 @@ impl<const N: usize, C: Controller, V: FwOfferValidator> ControllerWrapper<'_, N
             return PdError::InvalidPort.into();
         }
         Ok(&self.power[port.0 as usize])
+    }
+
+    /// Return a slice to all power devices
+    pub fn power_devices(&self) -> &[policy::device::Device] {
+        &self.power
     }
 
     /// Handle a new contract as consumer
