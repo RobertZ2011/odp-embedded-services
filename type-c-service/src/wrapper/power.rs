@@ -7,7 +7,6 @@ use embedded_services::{
         ConsumerPowerCapability, ProviderPowerCapability,
     },
 };
-use embedded_usb_pd::GlobalPortId;
 
 use super::*;
 
@@ -23,9 +22,7 @@ impl<'a, const N: usize, C: Controller, BACK: Backing<'a>, V: FwOfferValidator> 
     /// Handle a new contract as consumer
     pub(super) async fn process_new_consumer_contract(
         &self,
-        _controller: &mut C,
         power: &policy::device::Device,
-        _port: LocalPortId,
         status: &PortStatus,
     ) -> Result<(), Error<<C as Controller>::BusError>> {
         info!("Process new consumer contract");
@@ -76,15 +73,10 @@ impl<'a, const N: usize, C: Controller, BACK: Backing<'a>, V: FwOfferValidator> 
     /// Handle a new contract as provider
     pub(super) async fn process_new_provider_contract(
         &self,
-        port: GlobalPortId,
         power: &policy::device::Device,
         status: &PortStatus,
     ) -> Result<(), Error<<C as Controller>::BusError>> {
         info!("Process New provider contract");
-
-        if port.0 > N as u8 {
-            return PdError::InvalidPort.into();
-        }
 
         let current_state = power.state().await.kind();
         info!("current power state: {:?}", current_state);

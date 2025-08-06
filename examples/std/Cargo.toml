@@ -76,3 +76,6 @@ path = "src/bin/type_c/ucsi.rs"
 # Needed otherwise cargo will pull from git
 [patch."https://github.com/OpenDevicePartnership/embedded-services"]
 embedded-services = { path = "../../embedded-service" }
+
+[patch."https://github.com/OpenDevicePartnership/tps6699x"]
+tps6699x = { path = "../../../tps6699x" }
