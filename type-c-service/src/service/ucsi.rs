@@ -81,7 +81,7 @@ impl<'a> Service<'a> {
             Command::PpmCommand(ppm::Command::GetCapability) => Ok(self.process_get_capabilities().await),
             Command::LpmCommand(lpm::GlobalCommand { port: _, operation }) => match operation {
                 lpm::CommandData::GetConnectorCapability => Ok((
-                    //TODO: actually implement this
+                    //TODO: Send command to controller
                     GlobalResponse {
                         cci: Cci::new_cmd_complete(),
                         data: Some(ResponseData::LpmResponse(lpm::ResponseData::GetConnectorCapability(
@@ -102,7 +102,7 @@ impl<'a> Service<'a> {
                     Some(PpmInput::CommandImmediate),
                 )),
                 lpm::CommandData::GetConnectorStatus => Ok((
-                    //TODO: actually implement this
+                    //TODO: Send command to controller
                     GlobalResponse {
                         cci: Cci::new_cmd_complete(),
                         data: Some(ResponseData::LpmResponse(lpm::ResponseData::GetConnectorStatus(
@@ -111,10 +111,10 @@ impl<'a> Service<'a> {
                     },
                     Some(PpmInput::CommandImmediate),
                 )),
-                // TODO: implement other commands
-                _ => {
-                    error!("Invalid command received: {:?}", command);
-                    Err(PdError::InvalidMode)
+                // TODO: implement all other LPM commands
+                rest => {
+                    error!("Unsupported command received: {:?}", rest);
+                    Err(PdError::UnrecognizedCommand)
                 }
             },
             // TODO: implement other commands
