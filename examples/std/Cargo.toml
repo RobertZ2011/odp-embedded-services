@@ -12,15 +12,9 @@ warnings = "deny"
 workspace = true
 
 [dependencies]
-embassy-sync = { version = "0.7.2", features = [
-    "log",
-    "std",
-] }
+embassy-sync = { version = "0.7.2", features = ["log", "std"] }
 embassy-time-driver = { version = "0.2.0", optional = true }
-embassy-time = { version = "0.4.0", features = [
-    "log",
-    "std",
-] }
+embassy-time = { version = "0.4.0", features = ["log", "std"] }
 embassy-futures = "0.1.2"
 embassy-executor = { version = "0.9.0", features = [
     "arch-std",
@@ -80,3 +74,6 @@ path = "src/bin/type_c/ucsi.rs"
 # Needed otherwise cargo will pull from git
 [patch."https://github.com/OpenDevicePartnership/embedded-services"]
 embedded-services = { path = "../../embedded-service" }
+
+[patch."https://github.com/OpenDevicePartnership/embedded-usb-pd"]
+embedded-usb-pd = { path = "../../../embedded-usb-pd" }

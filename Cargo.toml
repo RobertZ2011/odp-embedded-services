@@ -72,3 +72,6 @@ tps6699x = { git = "https://github.com/OpenDevicePartnership/tps6699x" }
 tokio = { version = "1.42.0" }
 zerocopy = "0.8.26"
 uuid = { version = "=1.17.0", default-features = false }
+
+[patch."https://github.com/OpenDevicePartnership/embedded-usb-pd"]
+embedded-usb-pd = { path = "../embedded-usb-pd" }
