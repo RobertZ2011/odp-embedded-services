@@ -49,7 +49,7 @@ struct FwUpdateState<'a, M: RawMutex, B: I2c> {
     ///
     /// This value is never read, only used to keep the interrupt guard alive
     #[allow(dead_code)]
-    guards: [Option<tps6699x_drv::InterruptGuard<'a, M, B>>; 2],
+    guards: [Option<tps6699x_drv::InterruptGuard<'a, M, B>>; MAX_SUPPORTED_PORTS],
 }
 
 pub struct Tps6699x<'a, M: RawMutex, B: I2c> {
@@ -65,7 +65,7 @@ impl<'a, M: RawMutex, B: I2c> Tps6699x<'a, M, B> {
     /// Create a new TPS6699x instance
     ///
     /// Returns `None` if the number of ports is invalid.
-    pub fn new(
+    pub fn try_new(
         tps6699x: tps6699x_drv::Tps6699x<'a, M, B>,
         num_ports: usize,
         fw_update_config: FwUpdateConfig,
@@ -891,13 +891,17 @@ pub fn tps66994<'a, M: RawMutex, BUS: I2c, BACK: Backing<'a>, V: FwOfferValidato
         return Err(PdError::InvalidParams);
     }
 
+    const _: () = assert!(
+        TPS66994_NUM_PORTS > 0 && TPS66994_NUM_PORTS <= MAX_SUPPORTED_PORTS,
+        "Number of ports exceeds maximum supported"
+    );
     Ok(ControllerWrapper::new(
         controller::Device::new(controller_id, port_ids),
         from_fn(|i| policy::device::Device::new(power_ids[i])),
         CfuDevice::new(cfu_id),
         backing,
-        // Unwrap is safe because TPS66994_NUM_PORTS is a valid number of ports
-        Tps6699x::new(controller, TPS66994_NUM_PORTS, fw_update_config).unwrap(),
+        // Statically checked above
+        Tps6699x::try_new(controller, TPS66994_NUM_PORTS, fw_update_config).unwrap(),
         fw_version_validator,
     ))
 }
@@ -919,13 +923,17 @@ pub fn tps66993<'a, M: RawMutex, BUS: I2c, BACK: Backing<'a>, V: FwOfferValidato
         return Err(PdError::InvalidParams);
     }
 
+    const _: () = assert!(
+        TPS66993_NUM_PORTS > 0 && TPS66993_NUM_PORTS <= MAX_SUPPORTED_PORTS,
+        "Number of ports exceeds maximum supported"
+    );
     Ok(ControllerWrapper::new(
         controller::Device::new(controller_id, port_ids),
         from_fn(|i| policy::device::Device::new(power_ids[i])),
         CfuDevice::new(cfu_id),
         backing,
-        // Unwrap is safe because TPS66993_NUM_PORTS is a valid number of ports
-        Tps6699x::new(controller, TPS66993_NUM_PORTS, fw_update_config).unwrap(),
+        // Statically checked above
+        Tps6699x::try_new(controller, TPS66993_NUM_PORTS, fw_update_config).unwrap(),
         fw_version_validator,
     ))
 }
