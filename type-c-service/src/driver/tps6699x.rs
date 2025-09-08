@@ -521,7 +521,7 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
                 .await;
         }
 
-        let mut guards = [const { None }; 2];
+        let mut guards = [const { None }; MAX_SUPPORTED_PORTS];
         // Disable all interrupts on both ports, use guards[1] to ensure that this set of guards is dropped last
         disable_all_interrupts::<tps6699x_drv::Tps6699x<'_, M, B>>(&mut [&mut self.tps6699x], &mut guards[1..]).await?;
         let in_progress = updater.start_fw_update(&mut [&mut self.tps6699x], &mut delay).await?;
