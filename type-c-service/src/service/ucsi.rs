@@ -19,6 +19,12 @@ pub(super) struct State {
 }
 
 impl<'a> Service<'a> {
+    /// PPM reset implementation
+    async fn process_ppm_reset(&self, state: &mut State) {
+        debug!("Resetting PPM");
+        state.notifications_enabled = NotificationEnable::default();
+    }
+
     /// Set notification enable implementation
     async fn process_set_notification_enable(&self, state: &mut State, enable: NotificationEnable) {
         debug!("Set Notification Enable: {:?}", enable);
@@ -96,17 +102,28 @@ impl<'a> Service<'a> {
         // Loop to simplify the processing of commands
         // Executing a command requires two passes through the state machine
         // Using a loop allows all logic to be centralized
-        while let Some(ppm_input) = next_input {
-            match state.ppm_state_machine.consume(ppm_input) {
-                Err(e @ InvalidTransition { .. }) => {
-                    error!("PPM state machine transition failed: {:#?}", e);
-                    return external::UcsiResponse {
-                        notify_opm: true,
-                        cci: Cci::new_error(),
-                        data: Err(PdError::Failed),
-                    };
-                }
-                Ok(Some(ppm_output)) => match ppm_output {
+        loop {
+            if next_input.is_none() {
+                error!("Unexpected end of state machine processing");
+                return external::UcsiResponse {
+                    notify_opm: true,
+                    cci: Cci::new_error(),
+                    data: Err(PdError::InvalidMode),
+                };
+            }
+
+            let output = state.ppm_state_machine.consume(next_input.take().unwrap());
+            if let Err(e @ InvalidTransition { .. }) = &output {
+                error!("PPM state machine transition failed: {:#?}", e);
+                return external::UcsiResponse {
+                    notify_opm: true,
+                    cci: Cci::new_error(),
+                    data: Err(PdError::Failed),
+                };
+            }
+
+            match output.unwrap() {
+                Some(ppm_output) => match ppm_output {
                     PpmOutput::ExecuteCommand(command) => {
                         // Queue up the next input to complete the command execution flow
                         next_input = Some(PpmInput::CommandComplete);
@@ -124,48 +141,51 @@ impl<'a> Service<'a> {
                                     .map(|inner| inner.map(ResponseData::Lpm));
                             }
                         }
+
+                        // Don't return yet, need to inform state machine that command is complete
                     }
                     PpmOutput::OpmNotifyCommandComplete => {
                         response.notify_opm = state.notifications_enabled.cmd_complete();
                         response.cci.set_cmd_complete(true);
                         response.cci.set_error(response.data.is_err());
-                        break;
+                        return response;
                     }
                     PpmOutput::OpmNotifyAckComplete => {
                         // This is really a command complete, but it's signaled differently in the CCI
                         response.notify_opm = state.notifications_enabled.cmd_complete();
                         response.cci.set_ack_command(true);
-                        break;
+                        return response;
                     }
                     PpmOutput::ResetComplete => {
+                        // Resets don't follow the normal command execution flow
+                        // So do any reset processing here
+                        self.process_ppm_reset(state).await;
                         // Don't notify OPM because it'll poll
                         response.notify_opm = false;
                         response.cci = Cci::new_reset_complete();
-                        break;
+                        return response;
                     }
                     PpmOutput::OpmNotifyBusy => {
                         // Notify if notifications are enabled in general
                         response.notify_opm = !state.notifications_enabled.is_empty();
                         response.cci.set_busy(true);
-                        break;
+                        return response;
                     }
                     PpmOutput::OpmNotifyAsyncEvent => {
                         response.notify_opm = state.notifications_enabled.connect_change();
                         // TODO: use actual port
                         response.cci.set_connector_change(GlobalPortId(0));
-                        break;
+                        return response;
                     }
                 },
-                Ok(None) => {
+                None => {
                     // No output from PPM state machine, nothing specific to send back
                     response.notify_opm = false;
                     response.cci = Cci::default();
                     response.data = Ok(None);
-                    break;
+                    return response;
                 }
             }
         }
-
-        response
     }
 }
