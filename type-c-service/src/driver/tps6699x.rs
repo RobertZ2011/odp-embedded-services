@@ -1,4 +1,4 @@
-use crate::wrapper::backing::Backing;
+use crate::wrapper::backing::ReferencedStorage;
 use crate::wrapper::{ControllerWrapper, FwOfferValidator};
 use ::tps6699x::registers::field_sets::IntEventBus1;
 use ::tps6699x::registers::{PdCcPullUp, PpExtVbusSw, PpIntVbusSw};
@@ -746,22 +746,19 @@ pub type Tps6699xWrapper<'a, M, BUS, V> = ControllerWrapper<'a, M, Tps6699x<'a, 
 /// Create a TPS66994 controller wrapper, returns `None` if the number of ports is invalid
 pub fn tps66994<'a, M: RawMutex, BUS: I2c, V: FwOfferValidator>(
     controller: tps6699x_drv::Tps6699x<'a, M, BUS>,
-    backing: Backing<'a>,
+    storage: &'a ReferencedStorage<'a, TPS66994_NUM_PORTS, M>,
     fw_update_config: FwUpdateConfig,
     fw_version_validator: V,
 ) -> Option<Tps6699xWrapper<'a, M, BUS, V>> {
-    if backing.registration.num_ports() != TPS66994_NUM_PORTS {
-        return None;
-    }
-
     const _: () = assert!(
         TPS66994_NUM_PORTS > 0 && TPS66994_NUM_PORTS <= MAX_SUPPORTED_PORTS,
         "Number of ports exceeds maximum supported"
     );
+
     ControllerWrapper::try_new(
         // Statically checked above
         Tps6699x::try_new(controller, TPS66994_NUM_PORTS, fw_update_config).unwrap(),
-        backing,
+        storage,
         fw_version_validator,
     )
 }
@@ -769,14 +766,10 @@ pub fn tps66994<'a, M: RawMutex, BUS: I2c, V: FwOfferValidator>(
 /// Create a new TPS66993 controller wrapper, returns `None` if the number of ports is invalid
 pub fn tps66993<'a, M: RawMutex, BUS: I2c, V: FwOfferValidator>(
     controller: tps6699x_drv::Tps6699x<'a, M, BUS>,
-    backing: Backing<'a>,
+    backing: &'a ReferencedStorage<'a, TPS66993_NUM_PORTS, M>,
     fw_update_config: FwUpdateConfig,
     fw_version_validator: V,
 ) -> Option<Tps6699xWrapper<'a, M, BUS, V>> {
-    if backing.registration.num_ports() != TPS66993_NUM_PORTS {
-        return None;
-    }
-
     const _: () = assert!(
         TPS66993_NUM_PORTS > 0 && TPS66993_NUM_PORTS <= MAX_SUPPORTED_PORTS,
         "Number of ports exceeds maximum supported"

@@ -26,16 +26,14 @@ async fn controller_task() {
         0, // CFU component ID (unused)
         [(PORT0, POWER0)],
     ));
-
     static REFERENCED: StaticCell<type_c_service::wrapper::backing::ReferencedStorage<1, GlobalRawMutex>> =
         StaticCell::new();
     let referenced = REFERENCED.init(backing_storage.create_referenced());
-    let backing = referenced.create_backing().expect("Failed to create backing storage");
 
     static WRAPPER: StaticCell<mock_controller::Wrapper> = StaticCell::new();
     let controller = mock_controller::Controller::new(state);
     let wrapper = WRAPPER.init(
-        mock_controller::Wrapper::try_new(controller, backing, crate::mock_controller::Validator)
+        mock_controller::Wrapper::try_new(controller, referenced, crate::mock_controller::Validator)
             .expect("Failed to create wrapper"),
     );
 

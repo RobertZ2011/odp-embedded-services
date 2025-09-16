@@ -37,7 +37,7 @@ use embedded_services::{debug, error, info, trace, warn};
 use embedded_usb_pd::ado::Ado;
 use embedded_usb_pd::{Error, LocalPortId, PdError};
 
-use crate::wrapper::backing::{Backing, DynPortState};
+use crate::wrapper::backing::DynPortState;
 use crate::wrapper::message::*;
 use crate::{PortEventStreamer, PortEventVariant};
 
@@ -82,12 +82,17 @@ pub struct ControllerWrapper<'a, M: RawMutex, C: Controller, V: FwOfferValidator
 }
 
 impl<'a, M: RawMutex, C: Controller, V: FwOfferValidator> ControllerWrapper<'a, M, C, V> {
-    /// Create a new controller wrapper, returns `None` if the backing storage has an invalid port count
-    pub fn try_new(controller: C, backing: Backing<'a>, fw_version_validator: V) -> Option<Self> {
-        if backing.registration.num_ports() == 0 || backing.registration.num_ports() > MAX_SUPPORTED_PORTS {
-            return None;
-        }
+    /// Create a new controller wrapper, returns `None` if the backing storage is already in use
+    pub fn try_new<const N: usize>(
+        controller: C,
+        storage: &'a backing::ReferencedStorage<'a, N, M>,
+        fw_version_validator: V,
+    ) -> Option<Self> {
+        const {
+            assert!(N > 0 && N <= MAX_SUPPORTED_PORTS, "Invalid number of ports");
+        };
 
+        let backing = storage.create_backing()?;
         Some(Self {
             controller: Mutex::new(controller),
             fw_version_validator,

@@ -48,14 +48,13 @@ async fn task(spawner: Spawner) {
     let storage = STORAGE.init(Storage::new(CONTROLLER0, CFU0, [(PORT0, POWER0)]));
     static REFERENCED: StaticCell<ReferencedStorage<1, GlobalRawMutex>> = StaticCell::new();
     let referenced = REFERENCED.init(storage.create_referenced());
-    let backing0 = referenced.create_backing().expect("Failed to create backing storage");
 
     static STATE0: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state0 = STATE0.init(mock_controller::ControllerState::new());
     let controller0 = mock_controller::Controller::new(state0);
     static WRAPPER0: StaticCell<mock_controller::Wrapper> = StaticCell::new();
     let wrapper0 = WRAPPER0.init(
-        mock_controller::Wrapper::try_new(controller0, backing0, crate::mock_controller::Validator)
+        mock_controller::Wrapper::try_new(controller0, referenced, crate::mock_controller::Validator)
             .expect("Failed to create wrapper"),
     );
 
@@ -63,14 +62,13 @@ async fn task(spawner: Spawner) {
     let storage1 = STORAGE1.init(Storage::new(CONTROLLER1, CFU1, [(PORT1, POWER1)]));
     static REFERENCED1: StaticCell<ReferencedStorage<1, GlobalRawMutex>> = StaticCell::new();
     let referenced1 = REFERENCED1.init(storage1.create_referenced());
-    let backing1 = referenced1.create_backing().expect("Failed to create backing storage");
 
     static STATE1: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state1 = STATE1.init(mock_controller::ControllerState::new());
     let controller1 = mock_controller::Controller::new(state1);
     static WRAPPER1: StaticCell<mock_controller::Wrapper> = StaticCell::new();
     let wrapper1 = WRAPPER1.init(
-        mock_controller::Wrapper::try_new(controller1, backing1, crate::mock_controller::Validator)
+        mock_controller::Wrapper::try_new(controller1, referenced1, crate::mock_controller::Validator)
             .expect("Failed to create wrapper"),
     );
 
@@ -78,14 +76,13 @@ async fn task(spawner: Spawner) {
     let storage2 = STORAGE2.init(Storage::new(CONTROLLER2, CFU2, [(PORT2, POWER2)]));
     static REFERENCED2: StaticCell<ReferencedStorage<1, GlobalRawMutex>> = StaticCell::new();
     let referenced2 = REFERENCED2.init(storage2.create_referenced());
-    let backing2 = referenced2.create_backing().expect("Failed to create backing storage");
 
     static STATE2: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state2 = STATE2.init(mock_controller::ControllerState::new());
     let controller2 = mock_controller::Controller::new(state2);
     static WRAPPER2: StaticCell<mock_controller::Wrapper> = StaticCell::new();
     let wrapper2 = WRAPPER2.init(
-        mock_controller::Wrapper::try_new(controller2, backing2, crate::mock_controller::Validator)
+        mock_controller::Wrapper::try_new(controller2, referenced2, crate::mock_controller::Validator)
             .expect("Failed to create wrapper"),
     );
 

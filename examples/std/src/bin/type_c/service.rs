@@ -63,12 +63,11 @@ async fn controller_task(state: &'static mock_controller::ControllerState) {
     ));
     static REFERENCED: StaticCell<ReferencedStorage<1, GlobalRawMutex>> = StaticCell::new();
     let referenced = REFERENCED.init(storage.create_referenced());
-    let backing = referenced.create_backing().expect("Failed to create backing storage");
 
     static WRAPPER: StaticCell<mock_controller::Wrapper> = StaticCell::new();
     let controller = mock_controller::Controller::new(state);
     let wrapper = WRAPPER.init(
-        mock_controller::Wrapper::try_new(controller, backing, crate::mock_controller::Validator)
+        mock_controller::Wrapper::try_new(controller, referenced, crate::mock_controller::Validator)
             .expect("Failed to create wrapper"),
     );
 

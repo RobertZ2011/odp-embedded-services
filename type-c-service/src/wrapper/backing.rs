@@ -72,6 +72,8 @@ pub struct PortState<'a> {
     /// Pending events for the type-C service
     pub(crate) pending_events: PortEvent,
     /// PD alert channel for this port
+    // There's no direct immediate equivalent of a channel. PubSubChannel has immediate publisher behavior
+    // so we use that, but this requires us to keep separate publisher and subscriber objects.
     pub(crate) pd_alerts: (DynImmediatePublisher<'a, Ado>, DynSubscriber<'a, Ado>),
 }
 
