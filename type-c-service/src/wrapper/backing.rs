@@ -154,9 +154,9 @@ pub trait DynPortState<'a> {
 
 /// Service registration objects
 pub struct Registration<'a> {
-    pub(crate) pd_controller: &'a embedded_services::type_c::controller::Device<'a>,
-    pub(crate) cfu_device: &'a embedded_services::cfu::component::CfuDevice,
-    pub(crate) power_devices: &'a [embedded_services::power::policy::device::Device],
+    pub pd_controller: &'a embedded_services::type_c::controller::Device<'a>,
+    pub cfu_device: &'a embedded_services::cfu::component::CfuDevice,
+    pub power_devices: &'a [embedded_services::power::policy::device::Device],
 }
 
 impl<'a> Registration<'a> {
