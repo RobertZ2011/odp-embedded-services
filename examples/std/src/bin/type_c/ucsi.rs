@@ -116,10 +116,10 @@ async fn opm_task() {
     }
 
     info!("Get connector capability...");
-    let response: UcsiResponseResult = execute_ucsi_command(Command::LpmCommand(lpm::GlobalCommand {
-        port: GlobalPortId(0),
-        operation: lpm::CommandData::GetConnectorCapability,
-    }))
+    let response: UcsiResponseResult = execute_ucsi_command(Command::LpmCommand(lpm::GlobalCommand::new(
+        GlobalPortId(0),
+        lpm::CommandData::GetConnectorCapability,
+    )))
     .await
     .into();
     let response = response.unwrap();
@@ -144,10 +144,10 @@ async fn opm_task() {
     }
 
     info!("Get connector status...");
-    let response: UcsiResponseResult = execute_ucsi_command(Command::LpmCommand(lpm::GlobalCommand {
-        port: GlobalPortId(0),
-        operation: lpm::CommandData::GetConnectorStatus,
-    }))
+    let response: UcsiResponseResult = execute_ucsi_command(Command::LpmCommand(lpm::GlobalCommand::new(
+        GlobalPortId(0),
+        lpm::CommandData::GetConnectorStatus,
+    )))
     .await
     .into();
     let response = response.unwrap();
