@@ -294,12 +294,12 @@ impl embedded_services::type_c::controller::Controller for Controller<'_> {
     async fn execute_ucsi_command(
         &mut self,
         command: lpm::LocalCommand,
-    ) -> Result<lpm::ResponseData, Error<Self::BusError>> {
-        debug!("Execute UCSI command for port {:?}: {command:?}", command.port);
-        match command.operation {
-            lpm::CommandData::GetConnectorStatus => Ok(lpm::ResponseData::GetConnectorStatus(
+    ) -> Result<Option<lpm::ResponseData>, Error<Self::BusError>> {
+        debug!("Execute UCSI command for port {:?}: {command:?}", command.port());
+        match command.operation() {
+            lpm::CommandData::GetConnectorStatus => Ok(Some(lpm::ResponseData::GetConnectorStatus(
                 lpm::get_connector_status::ResponseData::default(),
-            )),
+            ))),
             _ => Err(PdError::UnrecognizedCommand.into()),
         }
     }
