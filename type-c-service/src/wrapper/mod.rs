@@ -637,11 +637,11 @@ where
 {
     type Inner = C::Inner;
 
-    fn try_lock(&self) -> Option<impl embedded_services::sync::RefMutGuard<Self::Inner>> {
+    fn try_lock(&self) -> Option<impl DerefMut<Target = Self::Inner>> {
         self.controller.try_lock()
     }
 
-    fn lock(&self) -> impl Future<Output = impl embedded_services::sync::RefMutGuard<Self::Inner>> {
+    fn lock(&self) -> impl Future<Output = impl DerefMut<Target = Self::Inner>> {
         self.controller.lock()
     }
 }
