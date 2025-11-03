@@ -4,8 +4,8 @@ use core::ops::DerefMut;
 use embassy_sync::mutex::Mutex;
 
 use super::{DeviceId, Error, action};
-use crate::ipc::deferred;
 use crate::power::policy::{ConsumerPowerCapability, ProviderPowerCapability};
+use crate::sync::Lockable;
 use crate::{GlobalRawMutex, intrusive_list};
 
 /// Most basic device states
@@ -110,21 +110,37 @@ pub struct Response {
     pub data: ResponseData,
 }
 
+/// Trait for devices that can be controlled by a power policy implementation
+pub trait DeviceTrait {
+    /// Disconnect power from this device
+    fn disconnect(&mut self) -> impl Future<Output = Result<(), Error>>;
+    /// Connect this device to provide power to an external connection
+    fn connect_provider(&mut self, capability: ProviderPowerCapability) -> impl Future<Output = Result<(), Error>>;
+    /// Connect this device to consume power from an external connection
+    fn connect_consumer(&mut self, capability: ConsumerPowerCapability) -> impl Future<Output = Result<(), Error>>;
+}
+
 /// Device struct
-pub struct Device {
+pub struct Device<'a, C: Lockable>
+where
+    C::Inner: DeviceTrait,
+{
     /// Intrusive list node
     node: intrusive_list::Node,
     /// Device ID
     id: DeviceId,
     /// Current state of the device
     state: Mutex<GlobalRawMutex, InternalState>,
-    /// Command channel
-    command: deferred::Channel<GlobalRawMutex, CommandData, InternalResponseData>,
+    /// Reference to hardware
+    pub(crate) device: &'a C,
 }
 
-impl Device {
+impl<'a, C: Lockable> Device<'a, C>
+where
+    C::Inner: DeviceTrait,
+{
     /// Create a new device
-    pub fn new(id: DeviceId) -> Self {
+    pub fn new(id: DeviceId, device: &'a C) -> Self {
         Self {
             node: intrusive_list::Node::uninit(),
             id,
@@ -133,7 +149,7 @@ impl Device {
                 consumer_capability: None,
                 requested_provider_capability: None,
             }),
-            command: deferred::Channel::new(),
+            device,
         }
     }
 
@@ -175,18 +191,6 @@ impl Device {
         self.state().await.kind() == StateKind::ConnectedProvider
     }
 
-    /// Execute a command on the device
-    pub(super) async fn execute_device_command(&self, command: CommandData) -> Result<ResponseData, Error> {
-        self.command.execute(command).await
-    }
-
-    /// Create a handler for the command channel
-    ///
-    /// DROP SAFETY: Direct call to deferred channel primitive
-    pub async fn receive(&self) -> deferred::Request<'_, GlobalRawMutex, CommandData, InternalResponseData> {
-        self.command.receive().await
-    }
-
     /// Internal function to set device state
     pub(super) async fn set_state(&self, new_state: State) {
         let mut lock = self.state.lock().await;
@@ -209,7 +213,7 @@ impl Device {
     }
 
     /// Try to provide access to the device actions for the given state
-    pub async fn try_device_action<S: action::Kind>(&self) -> Result<action::device::Device<'_, S>, Error> {
+    pub async fn try_device_action<S: action::Kind>(&self) -> Result<action::device::Device<'_, C, S>, Error> {
         let state = self.state().await.kind();
         if S::kind() != state {
             return Err(Error::InvalidState(S::kind(), state));
@@ -218,7 +222,7 @@ impl Device {
     }
 
     /// Provide access to the current device state
-    pub async fn device_action(&self) -> action::device::AnyState<'_> {
+    pub async fn device_action(&self) -> action::device::AnyState<'_, C> {
         match self.state().await.kind() {
             StateKind::Detached => action::device::AnyState::Detached(action::device::Device::new(self)),
             StateKind::Idle => action::device::AnyState::Idle(action::device::Device::new(self)),
@@ -233,7 +237,7 @@ impl Device {
 
     /// Try to provide access to the policy actions for the given state
     /// Implemented here for lifetime reasons
-    pub(super) async fn try_policy_action<S: action::Kind>(&self) -> Result<action::policy::Policy<'_, S>, Error> {
+    pub(super) async fn try_policy_action<S: action::Kind>(&self) -> Result<action::policy::Policy<'_, C, S>, Error> {
         let state = self.state().await.kind();
         if S::kind() != state {
             return Err(Error::InvalidState(S::kind(), state));
@@ -243,7 +247,7 @@ impl Device {
 
     /// Provide access to the current policy actions
     /// Implemented here for lifetime reasons
-    pub(super) async fn policy_action(&self) -> action::policy::AnyState<'_> {
+    pub(super) async fn policy_action(&self) -> action::policy::AnyState<'_, C> {
         match self.state().await.kind() {
             StateKind::Detached => action::policy::AnyState::Detached(action::policy::Policy::new(self)),
             StateKind::Idle => action::policy::AnyState::Idle(action::policy::Policy::new(self)),
@@ -257,7 +261,7 @@ impl Device {
     }
 
     /// Detach the device, this action is available in all states
-    pub async fn detach(&self) -> Result<action::device::Device<'_, action::Detached>, Error> {
+    pub async fn detach(&self) -> Result<action::device::Device<'_, C, action::Detached>, Error> {
         match self.device_action().await {
             action::device::AnyState::Detached(state) => Ok(state),
             action::device::AnyState::Idle(state) => state.detach().await,
@@ -267,20 +271,29 @@ impl Device {
     }
 }
 
-impl intrusive_list::NodeContainer for Device {
+impl<C: Lockable> intrusive_list::NodeContainer for Device<'static, C>
+where
+    C::Inner: DeviceTrait,
+{
     fn get_node(&self) -> &crate::Node {
         &self.node
     }
 }
 
 /// Trait for any container that holds a device
-pub trait DeviceContainer {
+pub trait DeviceContainer<C: Lockable>
+where
+    C::Inner: DeviceTrait,
+{
     /// Get the underlying device struct
-    fn get_power_policy_device(&self) -> &Device;
+    fn get_power_policy_device(&self) -> &Device<'_, C>;
 }
 
-impl DeviceContainer for Device {
-    fn get_power_policy_device(&self) -> &Device {
+impl<C: Lockable> DeviceContainer<C> for Device<'_, C>
+where
+    C::Inner: DeviceTrait,
+{
+    fn get_power_policy_device(&self) -> &Device<'_, C> {
         self
     }
 }

@@ -3,7 +3,9 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::GlobalRawMutex;
 use crate::broadcaster::immediate as broadcaster;
+use crate::power::policy::device::DeviceTrait;
 use crate::power::policy::{CommsMessage, ConsumerPowerCapability, ProviderPowerCapability};
+use crate::sync::Lockable;
 use embassy_sync::channel::Channel;
 use embassy_sync::once_lock::OnceLock;
 
@@ -106,9 +108,14 @@ pub fn init() {
 }
 
 /// Register a device with the power policy service
-pub async fn register_device(device: &'static impl device::DeviceContainer) -> Result<(), intrusive_list::Error> {
+pub async fn register_device<C: Lockable + 'static>(
+    device: &'static impl device::DeviceContainer<C>,
+) -> Result<(), intrusive_list::Error>
+where
+    C::Inner: DeviceTrait,
+{
     let device = device.get_power_policy_device();
-    if get_device(device.id()).await.is_some() {
+    if get_device::<C>(device.id()).await.is_some() {
         return Err(intrusive_list::Error::NodeAlreadyInList);
     }
 
@@ -126,9 +133,12 @@ pub async fn register_charger(device: &'static impl charger::ChargerContainer) -
 }
 
 /// Find a device by its ID
-async fn get_device(id: DeviceId) -> Option<&'static device::Device> {
+async fn get_device<C: Lockable + 'static>(id: DeviceId) -> Option<&'static device::Device<'static, C>>
+where
+    C::Inner: DeviceTrait,
+{
     for device in &CONTEXT.get().await.devices {
-        if let Some(data) = device.data::<device::Device>() {
+        if let Some(data) = device.data::<device::Device<'static, C>>() {
             if data.id() == id {
                 return Some(data);
             }
@@ -235,7 +245,13 @@ impl ContextToken {
     }
 
     /// Get a device by its ID
-    pub async fn get_device(&self, id: DeviceId) -> Result<&'static device::Device, Error> {
+    pub async fn get_device<C: Lockable + 'static>(
+        &self,
+        id: DeviceId,
+    ) -> Result<&'static device::Device<'static, C>, Error>
+    where
+        C::Inner: DeviceTrait,
+    {
         get_device(id).await.ok_or(Error::InvalidDevice)
     }
 
@@ -255,15 +271,24 @@ impl ContextToken {
     }
 
     /// Try to provide access to the actions available to the policy for the given state and device
-    pub async fn try_policy_action<S: action::Kind>(
+    pub async fn try_policy_action<C: Lockable + 'static, S: action::Kind>(
         &self,
         id: DeviceId,
-    ) -> Result<action::policy::Policy<'_, S>, Error> {
+    ) -> Result<action::policy::Policy<'static, C, S>, Error>
+    where
+        C::Inner: DeviceTrait,
+    {
         self.get_device(id).await?.try_policy_action().await
     }
 
     /// Provide access to current policy actions
-    pub async fn policy_action(&self, id: DeviceId) -> Result<action::policy::AnyState<'_>, Error> {
+    pub async fn policy_action<C: Lockable + 'static>(
+        &self,
+        id: DeviceId,
+    ) -> Result<action::policy::AnyState<'static, C>, Error>
+    where
+        C::Inner: DeviceTrait,
+    {
         Ok(self.get_device(id).await?.policy_action().await)
     }
 

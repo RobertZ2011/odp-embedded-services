@@ -1,27 +1,38 @@
 //! Device state machine actions
 use super::*;
+use crate::power::policy::device::DeviceTrait;
 use crate::power::policy::{ConsumerPowerCapability, Error, ProviderPowerCapability, device, policy};
+use crate::sync::Lockable;
 use crate::{info, trace};
 
 /// Device state machine control
-pub struct Device<'a, S: Kind> {
-    device: &'a device::Device,
+pub struct Device<'a, C: Lockable, S: Kind>
+where
+    C::Inner: DeviceTrait,
+{
+    device: &'a device::Device<'a, C>,
     _state: core::marker::PhantomData<S>,
 }
 
 /// Enum to contain any state
-pub enum AnyState<'a> {
+pub enum AnyState<'a, C: Lockable>
+where
+    C::Inner: DeviceTrait,
+{
     /// Detached
-    Detached(Device<'a, Detached>),
+    Detached(Device<'a, C, Detached>),
     /// Idle
-    Idle(Device<'a, Idle>),
+    Idle(Device<'a, C, Idle>),
     /// Connected Consumer
-    ConnectedConsumer(Device<'a, ConnectedConsumer>),
+    ConnectedConsumer(Device<'a, C, ConnectedConsumer>),
     /// Connected Provider
-    ConnectedProvider(Device<'a, ConnectedProvider>),
+    ConnectedProvider(Device<'a, C, ConnectedProvider>),
 }
 
-impl AnyState<'_> {
+impl<C: Lockable> AnyState<'_, C>
+where
+    C::Inner: DeviceTrait,
+{
     /// Return the kind of the contained state
     pub fn kind(&self) -> StateKind {
         match self {
@@ -33,9 +44,12 @@ impl AnyState<'_> {
     }
 }
 
-impl<'a, S: Kind> Device<'a, S> {
+impl<'a, C: Lockable, S: Kind> Device<'a, C, S>
+where
+    C::Inner: DeviceTrait,
+{
     /// Create a new state machine
-    pub(crate) fn new(device: &'a device::Device) -> Self {
+    pub(crate) fn new(device: &'a device::Device<'a, C>) -> Self {
         Self {
             device,
             _state: core::marker::PhantomData,
@@ -43,7 +57,7 @@ impl<'a, S: Kind> Device<'a, S> {
     }
 
     /// Detach the device
-    pub async fn detach(self) -> Result<Device<'a, Detached>, Error> {
+    pub async fn detach(self) -> Result<Device<'a, C, Detached>, Error> {
         info!("Received detach from device {}", self.device.id().0);
         self.device.set_state(device::State::Detached).await;
         self.device.update_consumer_capability(None).await;
@@ -107,9 +121,12 @@ impl<'a, S: Kind> Device<'a, S> {
     }
 }
 
-impl<'a> Device<'a, Detached> {
+impl<'a, C: Lockable> Device<'a, C, Detached>
+where
+    C::Inner: DeviceTrait,
+{
     /// Attach the device
-    pub async fn attach(self) -> Result<Device<'a, Idle>, Error> {
+    pub async fn attach(self) -> Result<Device<'a, C, Idle>, Error> {
         info!("Received attach from device {}", self.device.id().0);
         self.device.set_state(device::State::Idle).await;
         policy::send_request(self.device.id(), policy::RequestData::NotifyAttached)
@@ -119,7 +136,10 @@ impl<'a> Device<'a, Detached> {
     }
 }
 
-impl Device<'_, Idle> {
+impl<C: Lockable> Device<'_, C, Idle>
+where
+    C::Inner: DeviceTrait,
+{
     /// Notify the power policy service of an updated consumer power capability
     pub async fn notify_consumer_power_capability(
         &self,
@@ -134,9 +154,12 @@ impl Device<'_, Idle> {
     }
 }
 
-impl<'a> Device<'a, ConnectedConsumer> {
+impl<'a, C: Lockable> Device<'a, C, ConnectedConsumer>
+where
+    C::Inner: DeviceTrait,
+{
     /// Disconnect this device
-    pub async fn disconnect(self) -> Result<Device<'a, Idle>, Error> {
+    pub async fn disconnect(self) -> Result<Device<'a, C, Idle>, Error> {
         self.disconnect_internal().await?;
         Ok(Device::new(self.device))
     }
@@ -150,9 +173,12 @@ impl<'a> Device<'a, ConnectedConsumer> {
     }
 }
 
-impl<'a> Device<'a, ConnectedProvider> {
+impl<'a, C: Lockable> Device<'a, C, ConnectedProvider>
+where
+    C::Inner: DeviceTrait,
+{
     /// Disconnect this device
-    pub async fn disconnect(self) -> Result<Device<'a, Idle>, Error> {
+    pub async fn disconnect(self) -> Result<Device<'a, C, Idle>, Error> {
         self.disconnect_internal().await?;
         Ok(Device::new(self.device))
     }
