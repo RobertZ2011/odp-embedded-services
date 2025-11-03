@@ -35,14 +35,17 @@ fn cmp_consumer_capability(
     ))
 }
 
-impl PowerPolicy {
+impl<D: Lockable + 'static, R: EventReceiver + 'static> PowerPolicy<D, R>
+where
+    D::Inner: DeviceTrait,
+{
     /// Iterate over all devices to determine what is best power port provides the highest power
     async fn find_best_consumer(&self, state: &InternalState) -> Result<Option<AvailableConsumer>, Error> {
         let mut best_consumer = None;
         let current_consumer_id = state.current_consumer_state.map(|f| f.device_id);
 
         for node in self.context.devices().await {
-            let device = node.data::<Device>().ok_or(Error::InvalidDevice)?;
+            let device = node.data::<Device<D, R>>().ok_or(Error::InvalidDevice)?;
 
             // Update the best available consumer
             best_consumer = match (best_consumer, device.consumer_capability().await) {
@@ -83,7 +86,7 @@ impl PowerPolicy {
         // Count how many available unconstrained devices we have
         let mut unconstrained_new = UnconstrainedState::default();
         for node in self.context.devices().await {
-            let device = node.data::<Device>().ok_or(Error::InvalidDevice)?;
+            let device = node.data::<Device<D, R>>().ok_or(Error::InvalidDevice)?;
             if let Some(capability) = device.consumer_capability().await {
                 // The device is considered unconstrained if it meets the auto unconstrained power threshold
                 let auto_unconstrained = self
