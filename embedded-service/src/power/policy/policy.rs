@@ -1,4 +1,5 @@
 //! Context for any power policy implementations
+use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::broadcaster::immediate as broadcaster;
@@ -246,9 +247,17 @@ pub async fn register_message_receiver(
 }
 
 /// Singleton struct to give access to the power policy context
-pub struct ContextToken(());
+pub struct ContextToken<D: Lockable, R: EventReceiver>
+where
+    D::Inner: DeviceTrait,
+{
+    _phantom: PhantomData<(D, R)>,
+}
 
-impl ContextToken {
+impl<D: Lockable + 'static, R: EventReceiver + 'static> ContextToken<D, R>
+where
+    D::Inner: DeviceTrait,
+{
     /// Create a new context token, returning None if this function has been called before
     pub fn create() -> Option<Self> {
         static INIT: AtomicBool = AtomicBool::new(false);
@@ -257,7 +266,7 @@ impl ContextToken {
         }
 
         INIT.store(true, Ordering::SeqCst);
-        Some(ContextToken(()))
+        Some(ContextToken { _phantom: PhantomData })
     }
 
     /// Initialize Policy charger devices
@@ -271,13 +280,7 @@ impl ContextToken {
     }
 
     /// Get a device by its ID
-    pub async fn get_device<C: Lockable + 'static, R: EventReceiver + 'static>(
-        &self,
-        id: DeviceId,
-    ) -> Result<&'static device::Device<'static, C, R>, Error>
-    where
-        C::Inner: DeviceTrait,
-    {
+    pub async fn get_device(&self, id: DeviceId) -> Result<&'static device::Device<'static, D, R>, Error> {
         get_device(id).await.ok_or(Error::InvalidDevice)
     }
 
@@ -297,24 +300,15 @@ impl ContextToken {
     }
 
     /// Try to provide access to the actions available to the policy for the given state and device
-    pub async fn try_policy_action<C: Lockable + 'static, R: EventReceiver + 'static, S: action::Kind>(
+    pub async fn try_policy_action<S: action::Kind>(
         &self,
         id: DeviceId,
-    ) -> Result<action::policy::Policy<'static, C, R, S>, Error>
-    where
-        C::Inner: DeviceTrait,
-    {
+    ) -> Result<action::policy::Policy<'static, D, R, S>, Error> {
         self.get_device(id).await?.try_policy_action().await
     }
 
     /// Provide access to current policy actions
-    pub async fn policy_action<C: Lockable + 'static, R: EventReceiver + 'static>(
-        &self,
-        id: DeviceId,
-    ) -> Result<action::policy::AnyState<'static, C, R>, Error>
-    where
-        C::Inner: DeviceTrait,
-    {
+    pub async fn policy_action(&self, id: DeviceId) -> Result<action::policy::AnyState<'static, D, R>, Error> {
         Ok(self.get_device(id).await?.policy_action().await)
     }
 
