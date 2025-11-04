@@ -4,6 +4,7 @@ use core::pin::pin;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::broadcaster::immediate as broadcaster;
+use crate::event::{self, Receiver};
 use crate::power::policy::device::DeviceTrait;
 use crate::power::policy::{CommsMessage, ConsumerPowerCapability, ProviderPowerCapability};
 use crate::sync::Lockable;
@@ -70,12 +71,7 @@ pub struct Response {
 }
 
 /// Trait used by devices to send events to a power policy implementation
-pub trait EventSender {
-    /// Try to send an event
-    fn try_send(&mut self, event: RequestData) -> Option<()>;
-    /// Send an event
-    fn send(&mut self, event: RequestData) -> impl Future<Output = ()>;
-
+pub trait Sender: event::Sender<RequestData> {
     /// Wrapper to simplify sending this event
     fn on_attach(&mut self) -> impl Future<Output = ()> {
         self.send(RequestData::Attached)
@@ -122,13 +118,7 @@ pub trait EventSender {
     }
 }
 
-/// Receiver trait used by a policy implementation
-pub trait EventReceiver {
-    /// Attempt to get a pending event
-    fn try_next(&self) -> Option<RequestData>;
-    /// Wait for the next event
-    fn wait_next(&self) -> impl Future<Output = RequestData>;
-}
+impl<T> Sender for T where T: event::Sender<RequestData> {}
 
 /// Power policy context
 struct Context {
@@ -158,7 +148,7 @@ pub fn init() {
 }
 
 /// Register a device with the power policy service
-pub async fn register_device<C: Lockable + 'static, R: EventReceiver + 'static>(
+pub async fn register_device<C: Lockable + 'static, R: Receiver<RequestData> + 'static>(
     device: &'static impl device::DeviceContainer<C, R>,
 ) -> Result<(), intrusive_list::Error>
 where
@@ -183,7 +173,7 @@ pub async fn register_charger(device: &'static impl charger::ChargerContainer) -
 }
 
 /// Find a device by its ID
-async fn get_device<C: Lockable + 'static, R: EventReceiver + 'static>(
+async fn get_device<C: Lockable + 'static, R: Receiver<RequestData> + 'static>(
     id: DeviceId,
 ) -> Option<&'static device::Device<'static, C, R>>
 where
@@ -249,14 +239,14 @@ pub async fn register_message_receiver(
 }
 
 /// Singleton struct to give access to the power policy context
-pub struct ContextToken<D: Lockable, R: EventReceiver>
+pub struct ContextToken<D: Lockable, R: Receiver<RequestData>>
 where
     D::Inner: DeviceTrait,
 {
     _phantom: PhantomData<(D, R)>,
 }
 
-impl<D: Lockable + 'static, R: EventReceiver + 'static> ContextToken<D, R>
+impl<D: Lockable + 'static, R: Receiver<RequestData> + 'static> ContextToken<D, R>
 where
     D::Inner: DeviceTrait,
 {
@@ -311,7 +301,7 @@ where
         let mut futures = heapless::Vec::<_, 16>::new();
         for device in self.devices().await.iter_only::<device::Device<'static, D, R>>() {
             // TODO: check this at compile time
-            let _ = futures.push(async { device.receiver.wait_next().await });
+            let _ = futures.push(async { device.receiver.lock().await.wait_next().await });
         }
 
         let (event, index) = select_slice(pin!(&mut futures)).await;
