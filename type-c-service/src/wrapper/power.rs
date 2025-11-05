@@ -12,19 +12,20 @@ use embedded_services::{
 
 use super::*;
 
-impl<'device, M: RawMutex, C: Lockable, V: FwOfferValidator> ControllerWrapper<'device, M, C, V>
+impl<'device, M: RawMutex, C: Lockable, S: event::Sender<policy::RequestData>, V: FwOfferValidator>
+    ControllerWrapper<'device, M, C, S, V>
 where
     <C as Lockable>::Inner: Controller,
 {
     /// Return the power device for the given port
-    pub fn get_power_device(&self, port: LocalPortId) -> Option<&policy::device::Device> {
-        self.registration.power_devices.get(port.0 as usize)
+    pub fn get_power_device(&self, port: LocalPortId) -> Option<&S> {
+        self.registration.power_event_senders.get(port.0 as usize)
     }
 
     /// Handle a new contract as consumer
     pub(super) async fn process_new_consumer_contract(
         &self,
-        power: &policy::device::Device,
+        power: &mut S,
         status: &PortStatus,
     ) -> Result<(), Error<<C::Inner as Controller>::BusError>> {
         info!("Process new consumer contract");
@@ -172,7 +173,7 @@ where
         deferred::Request<'_, GlobalRawMutex, CommandData, InternalResponseData>,
     ) {
         let futures: [_; MAX_SUPPORTED_PORTS] = from_fn(|i| async move {
-            if let Some(device) = self.registration.power_devices.get(i) {
+            if let Some(device) = self.registration.power_event_senders.get(i) {
                 device.receive().await
             } else {
                 future::pending().await
