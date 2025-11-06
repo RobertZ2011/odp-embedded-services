@@ -37,7 +37,7 @@ use embedded_services::{debug, error, info, trace, warn};
 use embedded_usb_pd::ado::Ado;
 use embedded_usb_pd::{Error, LocalPortId, PdError};
 
-use crate::wrapper::backing::DynPortState;
+use crate::wrapper::backing::{DynPortState, PortPower};
 use crate::wrapper::message::*;
 use crate::{PortEventStreamer, PortEventVariant};
 
@@ -72,6 +72,7 @@ pub struct ControllerWrapper<
     M: RawMutex,
     C: Lockable,
     S: event::Sender<policy::RequestData>,
+    R: event::Receiver<policy::RequestData>,
     V: FwOfferValidator,
 > where
     <C as Lockable>::Inner: Controller,
@@ -82,22 +83,28 @@ pub struct ControllerWrapper<
     /// FW update ticker used to check for timeouts and recovery attempts
     fw_update_ticker: Mutex<M, embassy_time::Ticker>,
     /// Registration information for services
-    registration: backing::Registration<'device, S>,
+    registration: backing::Registration<'device, M, R>,
     /// State
-    state: Mutex<M, RefMut<'device, dyn DynPortState<'device>>>,
+    state: Mutex<M, RefMut<'device, dyn DynPortState<'device, S>>>,
     /// SW port status event signal
     sw_status_event: Signal<M, ()>,
 }
 
-impl<'device, M: RawMutex, C: Lockable, S: event::Sender<policy::RequestData>, V: FwOfferValidator>
-    ControllerWrapper<'device, M, C, S, V>
+impl<
+    'device,
+    M: RawMutex,
+    C: Lockable,
+    S: event::Sender<policy::RequestData>,
+    R: event::Receiver<policy::RequestData>,
+    V: FwOfferValidator,
+> ControllerWrapper<'device, M, C, S, R, V>
 where
     <C as Lockable>::Inner: Controller,
 {
     /// Create a new controller wrapper, returns `None` if the backing storage is already in use
     pub fn try_new<const N: usize>(
         controller: &'device C,
-        storage: &'device backing::ReferencedStorage<'device, N, M, S>,
+        storage: &'device backing::ReferencedStorage<'device, N, M, S, R>,
         fw_version_validator: V,
     ) -> Option<Self> {
         const {
@@ -115,11 +122,6 @@ where
             state: Mutex::new(backing.state),
             sw_status_event: Signal::new(),
         })
-    }
-
-    /// Get the power policy devices for this controller.
-    pub fn power_policy_senders(&self) -> &[S] {
-        self.registration.power_event_senders
     }
 
     /// Get the cached port status, returns None if the port is invalid
@@ -144,7 +146,7 @@ where
     async fn sync_state_internal(
         &self,
         controller: &mut C::Inner,
-        state: &mut dyn DynPortState<'_>,
+        state: &mut dyn DynPortState<'_, S>,
     ) -> Result<(), Error<<C::Inner as Controller>::BusError>> {
         // Sync the controller state with the PD controller
         for (i, port_state) in state.port_states_mut().iter_mut().enumerate() {
@@ -181,7 +183,7 @@ where
     async fn process_plug_event(
         &self,
         _controller: &mut C::Inner,
-        power: &mut S,
+        power: &mut PortPower<S>,
         port: LocalPortId,
         status: &PortStatus,
     ) -> Result<(), Error<<C::Inner as Controller>::BusError>> {
@@ -193,32 +195,12 @@ where
         info!("Plug event");
         if status.is_connected() {
             info!("Plug inserted");
-
-            // Recover if we're not in the correct state
-            if power.state().await.kind() != StateKind::Detached {
-                warn!("Power device not in detached state, recovering");
-                if let Err(e) = power.detach().await {
-                    error!("Error detaching power device: {:?}", e);
-                    return PdError::Failed.into();
-                }
-            }
-
-            if let Ok(state) = power.try_device_action::<action::Detached>().await {
-                if let Err(e) = state.attach().await {
-                    error!("Error attaching power device: {:?}", e);
-                    return PdError::Failed.into();
-                }
-            } else {
-                // This should never happen
-                error!("Power device not in detached state");
-                return PdError::InvalidMode.into();
+            if let Err(e) = power.state.attach() {
+                warn!("Power device not in detached state, recovering: {:#?}", e);
             }
         } else {
             info!("Plug removed");
-            if let Err(e) = power.detach().await {
-                error!("Error detaching power device: {:?}", e);
-                return PdError::Failed.into();
-            };
+            power.state.detach();
         }
 
         Ok(())
@@ -228,8 +210,7 @@ where
     async fn process_port_status_changed<'b>(
         &self,
         controller: &mut C::Inner,
-        power: &mut S,
-        state: &mut dyn DynPortState<'_>,
+        state: &mut dyn DynPortState<'_, S>,
         local_port_id: LocalPortId,
         status_event: PortStatusChanged,
     ) -> Result<Output<'b>, Error<<C::Inner as Controller>::BusError>> {
@@ -242,6 +223,11 @@ where
         let status = controller.get_port_status(local_port_id).await?;
         trace!("Port{} status: {:#?}", global_port_id.0, status);
         trace!("Port{} status events: {:#?}", global_port_id.0, status_event);
+
+        let power = state
+            .port_power_mut()
+            .get_mut(local_port_id.0 as usize)
+            .ok_or(PdError::InvalidPort)?;
         if status_event.plug_inserted_or_removed() {
             self.process_plug_event(controller, power, local_port_id, &status)
                 .await?;
@@ -275,7 +261,7 @@ where
     /// Finalize a port status change output
     async fn finalize_port_status_change(
         &self,
-        state: &mut dyn DynPortState<'_>,
+        state: &mut dyn DynPortState<'_, S>,
         local_port: LocalPortId,
         status_event: PortStatusChanged,
         status: PortStatus,
@@ -310,7 +296,7 @@ where
     /// Finalize a PD alert output
     async fn finalize_pd_alert(
         &self,
-        state: &mut dyn DynPortState<'_>,
+        state: &mut dyn DynPortState<'_, S>,
         local_port: LocalPortId,
         alert: Ado,
     ) -> Result<(), Error<<C::Inner as Controller>::BusError>> {
@@ -599,7 +585,7 @@ where
 
     /// Register all devices with their respective services
     pub async fn register(&'static self) -> Result<(), Error<<C::Inner as Controller>::BusError>> {
-        for device in self.registration.power_event_senders {
+        for device in self.registration.power_devices {
             policy::register_device(device).await.map_err(|_| {
                 error!(
                     "Controller{}: Failed to register power device {}",
@@ -634,7 +620,14 @@ where
     }
 }
 
-impl<'device, M: RawMutex, C: Lockable, V: FwOfferValidator> Lockable for ControllerWrapper<'device, M, C, V>
+impl<
+    'device,
+    M: RawMutex,
+    C: Lockable,
+    S: event::Sender<policy::RequestData>,
+    R: event::Receiver<policy::RequestData>,
+    V: FwOfferValidator,
+> Lockable for ControllerWrapper<'device, M, C, S, R, V>
 where
     <C as Lockable>::Inner: Controller,
 {
