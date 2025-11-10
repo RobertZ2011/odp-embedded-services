@@ -88,14 +88,30 @@ impl PowerPolicy {
         };
 
         let connected = if let Ok(action) = self.context.try_policy_action::<action::Idle>(requester.id()).await {
-            let _ = action.connect_provider(target_power).await;
+            if let Err(e) = action.connect_provider(target_power).await {
+                error!("Device{}: Failed to connect as provider, {:#?}", requester.id().0, e);
+            } else {
+                let _ = state.connected_providers.insert(requester.id());
+                self.comms_notify(CommsMessage {
+                    data: CommsData::ProviderConnected(requester.id(), target_power.capability),
+                })
+                .await;
+            }
             Ok(())
         } else if let Ok(action) = self
             .context
             .try_policy_action::<action::ConnectedProvider>(requester.id())
             .await
         {
-            let _ = action.connect_provider(target_power).await;
+            if let Err(e) = action.connect_provider(target_power).await {
+                error!("Device{}: Failed to connect as provider, {:#?}", requester.id().0, e);
+            } else {
+                let _ = state.connected_providers.insert(requester.id());
+                self.comms_notify(CommsMessage {
+                    data: CommsData::ProviderConnected(requester.id(), target_power.capability),
+                })
+                .await;
+            }
             Ok(())
         } else {
             Err(Error::InvalidState(

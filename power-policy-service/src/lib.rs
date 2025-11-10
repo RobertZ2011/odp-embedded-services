@@ -14,7 +14,9 @@ pub mod provider;
 pub use config::Config;
 pub mod charger;
 
-#[derive(Copy, Clone, Default)]
+const MAX_CONNECTED_PROVIDERS: usize = 4;
+
+#[derive(Clone, Default)]
 struct InternalState {
     /// Current consumer state, if any
     current_consumer_state: Option<consumer::AvailableConsumer>,
@@ -22,6 +24,8 @@ struct InternalState {
     current_provider_state: provider::State,
     /// System unconstrained power
     unconstrained: UnconstrainedState,
+    /// Connected providers
+    connected_providers: heapless::FnvIndexSet<DeviceId, MAX_CONNECTED_PROVIDERS>,
 }
 
 /// Power policy state
@@ -52,9 +56,17 @@ impl PowerPolicy {
         Ok(())
     }
 
-    async fn process_notify_detach(&self) -> Result<(), Error> {
+    async fn process_notify_detach(&self, device: &device::Device) -> Result<(), Error> {
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
-        self.update_current_consumer().await?;
+        if self.state.lock().await.connected_providers.remove(&device.id()) {
+            self.comms_notify(CommsMessage {
+                data: CommsData::ProviderDisconnected(device.id()),
+            })
+            .await;
+        } else {
+            self.update_current_consumer().await?;
+        }
+
         Ok(())
     }
 
@@ -70,7 +82,7 @@ impl PowerPolicy {
         Ok(())
     }
 
-    async fn process_notify_disconnect(&self) -> Result<(), Error> {
+    async fn process_notify_disconnect(&self, device: &device::Device) -> Result<(), Error> {
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
         if let Some(consumer) = self.state.lock().await.current_consumer_state.take() {
             info!("Device{}: Connected consumer disconnected", consumer.device_id.0);
@@ -78,6 +90,12 @@ impl PowerPolicy {
 
             self.comms_notify(CommsMessage {
                 data: CommsData::ConsumerDisconnected(consumer.device_id),
+            })
+            .await;
+        }
+        if self.state.lock().await.connected_providers.remove(&device.id()) {
+            self.comms_notify(CommsMessage {
+                data: CommsData::ProviderDisconnected(device.id()),
             })
             .await;
         }
@@ -109,7 +127,7 @@ impl PowerPolicy {
             }
             policy::RequestData::NotifyDetached => {
                 info!("Received notify detached from device {}", device.id().0);
-                self.process_notify_detach().await
+                self.process_notify_detach(device).await
             }
             policy::RequestData::NotifyConsumerCapability(capability) => {
                 info!(
@@ -129,7 +147,7 @@ impl PowerPolicy {
             }
             policy::RequestData::NotifyDisconnect => {
                 info!("Received notify disconnect from device {}", device.id().0);
-                self.process_notify_disconnect().await
+                self.process_notify_disconnect(device).await
             }
         }
     }
