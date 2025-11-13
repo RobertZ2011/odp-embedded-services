@@ -91,11 +91,8 @@ impl PowerPolicy {
             if let Err(e) = action.connect_provider(target_power).await {
                 error!("Device{}: Failed to connect as provider, {:#?}", requester.id().0, e);
             } else {
-                let _ = state.connected_providers.insert(requester.id());
-                self.comms_notify(CommsMessage {
-                    data: CommsData::ProviderConnected(requester.id(), target_power.capability),
-                })
-                .await;
+                self.post_provider_connected(&mut state, requester.id(), target_power.capability)
+                    .await;
             }
             Ok(())
         } else if let Ok(action) = self
@@ -106,11 +103,8 @@ impl PowerPolicy {
             if let Err(e) = action.connect_provider(target_power).await {
                 error!("Device{}: Failed to connect as provider, {:#?}", requester.id().0, e);
             } else {
-                let _ = state.connected_providers.insert(requester.id());
-                self.comms_notify(CommsMessage {
-                    data: CommsData::ProviderConnected(requester.id(), target_power.capability),
-                })
-                .await;
+                self.post_provider_connected(&mut state, requester.id(), target_power.capability)
+                    .await;
             }
             Ok(())
         } else {
@@ -124,5 +118,19 @@ impl PowerPolicy {
         if let Err(e) = connected {
             error!("Device{}: Failed to connect as provider, {:#?}", requester.id().0, e);
         }
+    }
+
+    /// Common logic for after a provider has successfully connected
+    async fn post_provider_connected(
+        &self,
+        state: &mut InternalState,
+        provider_id: DeviceId,
+        target_power: PowerCapability,
+    ) {
+        let _ = state.connected_providers.insert(provider_id);
+        self.comms_notify(CommsMessage {
+            data: CommsData::ProviderConnected(provider_id, target_power),
+        })
+        .await;
     }
 }

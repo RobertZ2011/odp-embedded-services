@@ -58,15 +58,10 @@ impl PowerPolicy {
 
     async fn process_notify_detach(&self, device: &device::Device) -> Result<(), Error> {
         self.context.send_response(Ok(policy::ResponseData::Complete)).await;
-        if self.state.lock().await.connected_providers.remove(&device.id()) {
-            self.comms_notify(CommsMessage {
-                data: CommsData::ProviderDisconnected(device.id()),
-            })
-            .await;
-        } else {
+        if !self.remove_connected_provider(device.id()).await {
+            // Only update consumers if a consumer was detached
             self.update_current_consumer().await?;
         }
-
         Ok(())
     }
 
@@ -93,13 +88,8 @@ impl PowerPolicy {
             })
             .await;
         }
-        if self.state.lock().await.connected_providers.remove(&device.id()) {
-            self.comms_notify(CommsMessage {
-                data: CommsData::ProviderDisconnected(device.id()),
-            })
-            .await;
-        }
 
+        self.remove_connected_provider(device.id()).await;
         self.update_current_consumer().await?;
         Ok(())
     }
@@ -111,6 +101,21 @@ impl PowerPolicy {
             .tp
             .send(comms::EndpointID::Internal(comms::Internal::Battery), &message)
             .await;
+    }
+
+    /// Common logic for when a provider is disconnected
+    ///
+    /// Returns true if the device was operating as a provider
+    async fn remove_connected_provider(&self, device_id: DeviceId) -> bool {
+        if self.state.lock().await.connected_providers.remove(&device_id) {
+            self.comms_notify(CommsMessage {
+                data: CommsData::ProviderDisconnected(device_id),
+            })
+            .await;
+            true
+        } else {
+            false
+        }
     }
 
     async fn wait_request(&self) -> policy::Request {
