@@ -173,6 +173,11 @@ impl PowerPolicy {
         state: &mut InternalState,
         new_consumer: AvailableConsumer,
     ) -> Result<(), Error> {
+        if new_consumer.consumer_power_capability.capability.max_power_mw() < 7500 {
+            debug!("RPZ not charging, too low");
+            return Ok(());
+        }
+
         // Handle our current consumer
         if let Some(current_consumer) = state.current_consumer_state {
             if new_consumer.device_id == current_consumer.device_id
