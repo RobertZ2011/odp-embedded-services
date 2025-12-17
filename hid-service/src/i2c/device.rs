@@ -203,7 +203,10 @@ impl<A: AddressMode + Copy, B: I2c<A>> Device<A, B> {
                 Some(hid::Response::InputReport(report))
             }
             hid::Request::Command(cmd) => self.handle_command(&cmd).await?,
-            _ => None,
+            _ => {
+                error!("Unimplemented HID request");
+                None
+            }
         };
 
         self.device
