@@ -40,8 +40,22 @@ impl PowerPolicy {
         for node in self.context.devices() {
             let device = node.data::<Device>().ok_or(Error::InvalidDevice)?;
 
+            let consumer_capability = device.consumer_capability().await;
+            // Don't consider consumers below minimum threshold
+            if consumer_capability.is_some_and(|cap| {
+                self.config
+                    .min_consumer_threshold_mw
+                    .is_some_and(|min| cap.capability.max_power_mw() < min)
+            }) {
+                info!(
+                    "Device{}: Not considering consumer, power capability is too low",
+                    device.id().0,
+                );
+                continue;
+            }
+
             // Update the best available consumer
-            best_consumer = match (best_consumer, device.consumer_capability().await) {
+            best_consumer = match (best_consumer, consumer_capability) {
                 // Nothing available
                 (None, None) => None,
                 // No existing consumer
@@ -173,11 +187,6 @@ impl PowerPolicy {
         state: &mut InternalState,
         new_consumer: AvailableConsumer,
     ) -> Result<(), Error> {
-        if new_consumer.consumer_power_capability.capability.max_power_mw() < 7500 {
-            debug!("RPZ not charging, too low");
-            return Ok(());
-        }
-
         // Handle our current consumer
         if let Some(current_consumer) = state.current_consumer_state {
             if new_consumer.device_id == current_consumer.device_id
