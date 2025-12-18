@@ -42,11 +42,10 @@ impl PowerPolicy {
 
             let consumer_capability = device.consumer_capability().await;
             // Don't consider consumers below minimum threshold
-            if consumer_capability.is_some_and(|cap| {
-                self.config
-                    .min_consumer_threshold_mw
-                    .is_some_and(|min| cap.capability.max_power_mw() < min)
-            }) {
+            if consumer_capability
+                .zip(self.config.min_consumer_threshold_mw)
+                .is_some_and(|(cap, min)| cap.capability.max_power_mw() < min)
+            {
                 info!(
                     "Device{}: Not considering consumer, power capability is too low",
                     device.id().0,

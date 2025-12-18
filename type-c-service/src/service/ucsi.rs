@@ -84,7 +84,7 @@ impl<'a> Service<'a> {
 
                 let bc_config = &self.config.ucsi_battery_charging_config;
                 if bc_config
-                    .no_battery_charging_mw
+                    .not_battery_charging_mw
                     .is_some_and(|threshold| power_mw < threshold)
                 {
                     Some(BatteryChargingCapabilityStatus::NotCharging)
@@ -292,7 +292,7 @@ impl<'a> Service<'a> {
         }
     }
 
-    /// Convert from general PD events into UCSI-specific events
+    /// Handle PD port events, update UCSI state, and generate corresponding UCSI notifications
     pub(super) async fn handle_ucsi_port_event(
         &self,
         port_id: GlobalPortId,
@@ -319,13 +319,11 @@ impl<'a> Service<'a> {
             ucsi_event.set_external_supply_change(true);
             ucsi_event.set_power_direction_changed(true);
             ucsi_event.set_battery_charging_status_change(true);
-            debug!(
-                "RPZ UCSI power contract change detected on port {}, port_event: {:#?}",
-                port_id.0, port_event
-            );
 
             // Power negotiation completed, battery charging capability status is now valid
-            let _ = state.valid_battery_charging_capability.insert(port_id);
+            if state.valid_battery_charging_capability.insert(port_id).is_err() {
+                error!("Valid battery charging capability overflow for port {:?}", port_id);
+            }
         }
 
         if !port_status.is_connected() {
