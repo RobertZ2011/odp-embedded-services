@@ -75,9 +75,9 @@ impl UcsiBatteryChargingThresholdConfig {
     ///
     /// If below a threshold, that status is returned. If a threshold is [`None`], it is ignored and its status won't be
     /// returned. The order of checks is from lowest to highest threshold:
-    /// 1. `not_battery_charging_mw` -> [`NotCharging`][BatteryChargingCapabilityStatus::NotCharging]
-    /// 1. `very_slow_battery_charging_mw` -> [`VerySlow`][BatteryChargingCapabilityStatus::VerySlow]
-    /// 1. `slow_battery_charging_mw` -> [`Slow`][BatteryChargingCapabilityStatus::Slow]
+    /// 1. `not_charging_mw` -> [`NotCharging`][BatteryChargingCapabilityStatus::NotCharging]
+    /// 1. `very_slow_charging_mw` -> [`VerySlow`][BatteryChargingCapabilityStatus::VerySlow]
+    /// 1. `slow_charging_mw` -> [`Slow`][BatteryChargingCapabilityStatus::Slow]
     /// 1. Above all thresholds -> [`Nominal`][BatteryChargingCapabilityStatus::Nominal]
     pub const fn status_of(&self, power_mw: u32) -> BatteryChargingCapabilityStatus {
         if let Some(threshold) = self.not_charging_mw
