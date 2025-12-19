@@ -34,7 +34,7 @@ impl UcsiBatteryChargingThresholdConfig {
     /// The thresholds must satisfy:
     ///
     /// ```text
-    /// no_battery_charging_mw < very_slow_battery_charging_mw < slow_battery_charging_mw
+    /// not_charging_mw < very_slow_charging_mw < slow_charging_mw
     /// ```
     ///
     /// Any of the thresholds can be [`None`], which ignores that threshold in the ordering checks and subsequently when
