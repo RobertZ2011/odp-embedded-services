@@ -125,7 +125,6 @@ mod tests {
 
             #[test]
             fn valid() {
-                // Valid ordering
                 assert!(UcsiBatteryChargingThresholdConfig::try_new(Some(1000), Some(2000), Some(3000)).is_some());
                 assert!(UcsiBatteryChargingThresholdConfig::try_new(None, Some(2000), Some(3000)).is_some());
                 assert!(UcsiBatteryChargingThresholdConfig::try_new(Some(1000), None, Some(3000)).is_some());
@@ -135,12 +134,18 @@ mod tests {
 
             #[test]
             fn invalid() {
-                // Invalid ordering
                 assert!(UcsiBatteryChargingThresholdConfig::try_new(Some(3000), Some(2000), Some(1000)).is_none());
                 assert!(UcsiBatteryChargingThresholdConfig::try_new(Some(2000), Some(2000), Some(3000)).is_none());
                 assert!(UcsiBatteryChargingThresholdConfig::try_new(Some(1000), Some(1000), Some(3000)).is_none());
                 assert!(UcsiBatteryChargingThresholdConfig::try_new(Some(1000), Some(2000), Some(2000)).is_none());
                 assert!(UcsiBatteryChargingThresholdConfig::try_new(Some(3000), None, Some(1000)).is_none());
+            }
+
+            #[test]
+            fn equal_is_invalid() {
+                assert!(UcsiBatteryChargingThresholdConfig::try_new(Some(1000), Some(1000), None).is_none());
+                assert!(UcsiBatteryChargingThresholdConfig::try_new(None, Some(2000), Some(2000)).is_none());
+                assert!(UcsiBatteryChargingThresholdConfig::try_new(Some(3000), None, Some(3000)).is_none());
             }
         }
 
