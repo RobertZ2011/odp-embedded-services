@@ -82,25 +82,7 @@ impl<'a> Service<'a> {
                     .map(|contract| contract.max_power_mw())
                     .unwrap_or(0);
 
-                let bc_config = &self.config.ucsi_battery_charging_config;
-                if bc_config
-                    .not_battery_charging_mw
-                    .is_some_and(|threshold| power_mw < threshold)
-                {
-                    Some(BatteryChargingCapabilityStatus::NotCharging)
-                } else if bc_config
-                    .very_slow_battery_charging_mw
-                    .is_some_and(|threshold| power_mw < threshold)
-                {
-                    Some(BatteryChargingCapabilityStatus::VerySlow)
-                } else if bc_config
-                    .slow_battery_charging_mw
-                    .is_some_and(|threshold| power_mw < threshold)
-                {
-                    Some(BatteryChargingCapabilityStatus::Slow)
-                } else {
-                    Some(BatteryChargingCapabilityStatus::Nominal)
-                }
+                Some(self.config.ucsi_battery_charging_config.status_of(power_mw))
             } else {
                 // Report normal charging until something changes
                 Some(BatteryChargingCapabilityStatus::Nominal)
