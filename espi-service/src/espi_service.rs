@@ -4,11 +4,10 @@ use crate::mctp::{HostRequest, HostResult, OdpHeader, OdpMessageType, OdpService
 use core::borrow::BorrowMut;
 use embassy_imxrt::espi;
 use embassy_sync::channel::Channel;
-use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embedded_services::buffer::OwnedRef;
 use embedded_services::comms::{self, EndpointID, External};
-use embedded_services::{GlobalRawMutex, debug, ec_type, error, info, trace};
+use embedded_services::{GlobalRawMutex, debug, error, info, trace};
 use mctp_rs::smbus_espi::SmbusEspiMedium;
 use mctp_rs::smbus_espi::SmbusEspiReplyContext;
 
@@ -39,16 +38,15 @@ pub enum Error {
 
 pub struct Service<'a> {
     endpoint: comms::Endpoint,
-    _ec_memory: Mutex<GlobalRawMutex, &'a mut ec_type::structure::ECMemory>,
     host_tx_queue: Channel<GlobalRawMutex, HostResultMessage, HOST_TX_QUEUE_SIZE>,
     assembly_buf_owned_ref: OwnedRef<'a, u8>,
 }
 
 impl Service<'_> {
-    pub fn new(ec_memory: &'static mut ec_type::structure::ECMemory) -> Self {
+    #[allow(clippy::new_without_default)] // When we break the dependency on embassy-imxrt, we'll need to take an eSPI trait implementation as an argument, so it doesn't make sense to provide a default implementation
+    pub fn new() -> Self {
         Service {
             endpoint: comms::Endpoint::uninit(EndpointID::External(External::Host)),
-            _ec_memory: Mutex::new(ec_memory),
             host_tx_queue: Channel::new(),
             assembly_buf_owned_ref: assembly_buf::get_mut().unwrap(),
         }
