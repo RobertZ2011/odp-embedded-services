@@ -235,7 +235,7 @@ where
     pub async fn wait_request(&self) -> Request {
         let mut futures = heapless::Vec::<_, 16>::new();
         for device in self.devices().iter_only::<device::Device<'static, D, R>>() {
-            // TODO: check this at compile time
+            // TODO: Validate Vec size at compile time
             if futures
                 .push(async { device.receiver.lock().await.wait_next().await })
                 .is_err()

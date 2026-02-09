@@ -121,16 +121,12 @@ impl InternalState {
         &mut self,
         capability: Option<ConsumerPowerCapability>,
     ) -> Result<(), Error> {
-        let result = if matches!(
-            self.state,
-            State::Idle | State::ConnectedConsumer(_) | State::ConnectedProvider(_)
-        ) {
-            Ok(())
-        } else {
-            Err(Error::InvalidState(
+        let result = match self.state {
+            State::Idle | State::ConnectedConsumer(_) | State::ConnectedProvider(_) => Ok(()),
+            _ => Err(Error::InvalidState(
                 &[StateKind::Idle, StateKind::ConnectedConsumer],
                 self.state.kind(),
-            ))
+            )),
         };
         self.consumer_capability = capability;
         result
@@ -146,16 +142,12 @@ impl InternalState {
             return Ok(());
         }
 
-        let result = if matches!(
-            self.state,
-            State::Idle | State::ConnectedConsumer(_) | State::ConnectedProvider(_)
-        ) {
-            Ok(())
-        } else {
-            Err(Error::InvalidState(
+        let result = match self.state {
+            State::Idle | State::ConnectedConsumer(_) | State::ConnectedProvider(_) => Ok(()),
+            _ => Err(Error::InvalidState(
                 &[StateKind::Idle, StateKind::ConnectedProvider],
                 self.state.kind(),
-            ))
+            )),
         };
 
         self.requested_provider_capability = capability;
@@ -253,7 +245,7 @@ pub struct Response {
     pub data: ResponseData,
 }
 
-/// Trait for devices that can be controlled by a power policy implementation
+/// Trait for PSU devices
 pub trait DeviceTrait {
     /// Disconnect power from this device
     fn disconnect(&mut self) -> impl Future<Output = Result<(), Error>>;
@@ -263,7 +255,7 @@ pub trait DeviceTrait {
     fn connect_consumer(&mut self, capability: ConsumerPowerCapability) -> impl Future<Output = Result<(), Error>>;
 }
 
-/// Device struct
+/// PSU registration struct
 pub struct Device<'a, D: Lockable, R: Receiver<RequestData>>
 where
     D::Inner: DeviceTrait,
