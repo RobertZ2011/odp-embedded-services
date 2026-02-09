@@ -36,8 +36,8 @@ impl<'a, S: event::Sender<RequestData>> Mock<'a, S> {
             .fn_call
             .try_take()
             .map(|(num_fn_calls, _)| num_fn_calls)
-            .unwrap_or(1);
-        self.fn_call.signal((num_fn_calls, fn_call));
+            .unwrap_or(0);
+        self.fn_call.signal((num_fn_calls + 1, fn_call));
     }
 
     pub async fn simulate_consumer_connection(&mut self, capability: PowerCapability) {

@@ -65,7 +65,11 @@ where
         power
             .sender
             .send(policy::RequestData::RequestedProviderCapability(
-                status.available_source_contract.map(ProviderPowerCapability::from),
+                status.available_source_contract.map(|caps| {
+                    let mut caps = ProviderPowerCapability::from(caps);
+                    caps.flags.set_psu_type(PsuType::TypeC);
+                    caps
+                }),
             ))
             .await;
         Ok(())
