@@ -3,9 +3,7 @@ use embassy_sync::{
     mutex::Mutex,
     pubsub::{DynImmediatePublisher, DynSubscriber},
 };
-use embedded_services::{
-    GlobalRawMutex, debug, error, event::Receiver, info, intrusive_list, ipc::deferred, sync::Lockable, trace,
-};
+use embedded_services::{GlobalRawMutex, debug, error, info, intrusive_list, ipc::deferred, trace};
 use embedded_usb_pd::GlobalPortId;
 use embedded_usb_pd::PdError as Error;
 
@@ -57,13 +55,13 @@ pub struct Service<'a> {
     /// This is the corresponding publisher to [`Self::power_policy_event_subscriber`], power policy events
     /// will be buffered in the channel until they are brought into the event loop with the subscriber.
     power_policy_event_publisher:
-        embedded_services::broadcaster::immediate::Receiver<'a, power_policy_interface::service::event::CommsMessage>,
+        embedded_services::broadcaster::immediate::Receiver<'a, power_policy_service::service::event::CommsMessage>,
     /// Power policy event subscriber
     ///
     /// This is the corresponding subscriber to [`Self::power_policy_event_publisher`], needs to be a mutex because getting a message
     /// from the channel requires mutable access.
     power_policy_event_subscriber:
-        Mutex<GlobalRawMutex, DynSubscriber<'a, power_policy_interface::service::event::CommsMessage>>,
+        Mutex<GlobalRawMutex, DynSubscriber<'a, power_policy_service::service::event::CommsMessage>>,
 }
 
 /// Power policy events
@@ -72,7 +70,7 @@ pub struct Service<'a> {
 // But there's currently not a way to do look-ups between power policy device IDs and GlobalPortIds
 pub enum PowerPolicyEvent {
     /// Unconstrained state changed
-    Unconstrained(power_policy_interface::service::UnconstrainedState),
+    Unconstrained(power_policy_service::service::UnconstrainedState),
     /// Consumer disconnected
     ConsumerDisconnected,
     /// Consumer connected
@@ -97,8 +95,8 @@ impl<'a> Service<'a> {
         config: config::Config,
         context: &'a crate::type_c::controller::Context,
         controller_list: &'a intrusive_list::IntrusiveList,
-        power_policy_publisher: DynImmediatePublisher<'a, power_policy_interface::service::event::CommsMessage>,
-        power_policy_subscriber: DynSubscriber<'a, power_policy_interface::service::event::CommsMessage>,
+        power_policy_publisher: DynImmediatePublisher<'a, power_policy_service::service::event::CommsMessage>,
+        power_policy_subscriber: DynSubscriber<'a, power_policy_service::service::event::CommsMessage>,
     ) -> Self {
         Self {
             context,
@@ -252,16 +250,10 @@ impl<'a> Service<'a> {
     }
 
     /// Register the Type-C service with the power policy service
-    pub fn register_comms<
-        PD: Lockable + 'static,
-        PR: Receiver<power_policy_interface::psu::event::RequestData> + 'static,
-    >(
+    pub fn register_comms(
         &'static self,
-        power_policy_context: &power_policy_service::service::context::Context<PD, PR>,
-    ) -> Result<(), intrusive_list::Error>
-    where
-        PD::Inner: power_policy_interface::psu::Psu,
-    {
+        power_policy_context: &power_policy_service::service::context::Context,
+    ) -> Result<(), intrusive_list::Error> {
         power_policy_context.register_message_receiver(&self.power_policy_event_publisher)
     }
 
