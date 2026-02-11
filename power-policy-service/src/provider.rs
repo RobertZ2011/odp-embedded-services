@@ -37,8 +37,8 @@ where
             Some(cap) => cap,
             // Requester is no longer requesting power
             _ => {
-                error!("Device{}: No-longer requesting power", requester.id().0);
-                return Err(Error::CannotProvide(None));
+                info!("Device{}: No-longer requesting power", requester.id().0);
+                return Ok(());
             }
         };
         let mut policy_state = self.state.lock().await;

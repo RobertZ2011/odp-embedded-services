@@ -124,7 +124,11 @@ impl InternalState {
         let result = match self.state {
             State::Idle | State::ConnectedConsumer(_) | State::ConnectedProvider(_) => Ok(()),
             _ => Err(Error::InvalidState(
-                &[StateKind::Idle, StateKind::ConnectedConsumer],
+                &[
+                    StateKind::Idle,
+                    StateKind::ConnectedConsumer,
+                    StateKind::ConnectedProvider,
+                ],
                 self.state.kind(),
             )),
         };
@@ -145,7 +149,11 @@ impl InternalState {
         let result = match self.state {
             State::Idle | State::ConnectedConsumer(_) | State::ConnectedProvider(_) => Ok(()),
             _ => Err(Error::InvalidState(
-                &[StateKind::Idle, StateKind::ConnectedProvider],
+                &[
+                    StateKind::Idle,
+                    StateKind::ConnectedProvider,
+                    StateKind::ConnectedConsumer,
+                ],
                 self.state.kind(),
             )),
         };
