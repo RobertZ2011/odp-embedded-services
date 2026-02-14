@@ -5,11 +5,11 @@ use battery_service_messages::{AcpiBatteryRequest, AcpiBatteryResponse, DeviceId
 use embassy_sync::channel::Channel;
 use embassy_sync::channel::TrySendError;
 use embassy_sync::mutex::Mutex;
+use embassy_sync::signal::Signal;
 use embassy_time::{Duration, with_timeout};
 use embedded_services::GlobalRawMutex;
-use embedded_services::comms::MailboxDelegateError;
 use embedded_services::{IntrusiveList, debug, error, info, intrusive_list, trace, warn};
-use power_policy_interface::capability::PowerCapability;
+use power_policy_service::capability::PowerCapability;
 
 use core::ops::DerefMut;
 use core::sync::atomic::AtomicUsize;
@@ -137,6 +137,7 @@ pub struct Context {
     battery_response: Channel<GlobalRawMutex, BatteryResponse, 1>,
     no_op_retry_count: AtomicUsize,
     config: Config,
+    acpi_request: Signal<GlobalRawMutex, AcpiBatteryRequest>,
     power_info: Mutex<GlobalRawMutex, PsuState>,
 }
 
@@ -178,6 +179,7 @@ impl Context {
             battery_response: Channel::new(),
             no_op_retry_count: AtomicUsize::new(0),
             config,
+            acpi_request: Signal::new(),
             power_info: Mutex::new(PsuState::new()),
         }
     }
@@ -482,6 +484,14 @@ impl Context {
         self.battery_event.receive().await
     }
 
+    pub(super) fn send_acpi_cmd(&self, request: AcpiBatteryRequest) {
+        self.acpi_request.signal(request);
+    }
+
+    pub(super) async fn wait_acpi_cmd(&self) -> AcpiBatteryRequest {
+        self.acpi_request.wait().await
+    }
+
     pub async fn get_state(&self) -> State {
         *self.state.lock().await
     }
@@ -517,9 +527,10 @@ impl Context {
         *self.power_info.lock().await
     }
 
-    pub(crate) fn set_power_info(
+    // TODO: bring back when power policy messaging is working again
+    /*pub(crate) fn set_power_info(
         &self,
-        power_info: &power_policy_interface::service::event::CommsData,
+        power_info: &power_policy_service::service::event::CommsData,
     ) -> Result<(), MailboxDelegateError> {
         let mut guard = self
             .power_info
@@ -529,13 +540,13 @@ impl Context {
         let psu_state = guard.deref_mut();
 
         match power_info {
-            power_policy_interface::service::event::CommsData::ConsumerDisconnected(_) => {
+            power_policy_service::service::event::CommsData::ConsumerDisconnected(_) => {
                 *psu_state = PsuState {
                     psu_connected: false,
                     power_capability: None,
                 }
             }
-            power_policy_interface::service::event::CommsData::ConsumerConnected(_device_id, power_capability) => {
+            power_policy_service::service::event::CommsData::ConsumerConnected(_device_id, power_capability) => {
                 *psu_state = PsuState {
                     psu_connected: true,
                     power_capability: Some(power_capability.capability),
@@ -546,7 +557,7 @@ impl Context {
 
         trace!("Battery: PSU state: {:?}", psu_state);
         Ok(())
-    }
+    }*/
 }
 
 impl Default for Context {
