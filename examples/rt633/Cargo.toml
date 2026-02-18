@@ -9,6 +9,9 @@ license = "MIT"
 [workspace.lints.rust]
 warnings = "deny"
 
+[package.metadata.cargo-machete]
+ignored = ["cortex-m", "cortex-m-rt"]
+
 [lints]
 workspace = true
 

@@ -7,6 +7,9 @@ repository = "https://github.com/OpenDevicePartnership/embedded-services"
 rust-version = "1.88"
 license = "MIT"
 
+[package.metadata.cargo-machete]
+ignored = ["defmt", "log"]
+
 [dependencies]
 defmt = { workspace = true, optional = true }
 log = { workspace = true, optional = true }
