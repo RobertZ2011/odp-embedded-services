@@ -7,6 +7,9 @@ repository = "https://github.com/OpenDevicePartnership/embedded-services"
 rust-version = "1.88"
 license = "MIT"
 
+[package.metadata.cargo-machete]
+ignored = ["log"]
+
 [lints]
 workspace = true
 
@@ -16,12 +19,8 @@ embassy-futures.workspace = true
 embassy-sync.workspace = true
 embassy-time.workspace = true
 embedded-batteries-async.workspace = true
-embedded-hal-async.workspace = true
-embedded-hal.workspace = true
 embedded-services.workspace = true
 log = { workspace = true, optional = true }
-zerocopy.workspace = true
-mctp-rs = { workspace = true, features = ["espi"] }
 
 [features]
 default = []
@@ -31,7 +30,6 @@ defmt = [
     "embassy-time/defmt",
     "embassy-sync/defmt",
     "embedded-batteries-async/defmt",
-    "mctp-rs/defmt",
 ]
 log = [
     "dep:log",
