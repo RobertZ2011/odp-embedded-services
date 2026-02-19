@@ -56,7 +56,7 @@ where
         let current_consumer = self.state.current_consumer_state.as_ref().map(|f| f.psu);
 
         for psu in self.psu_devices.iter() {
-            let mut locked_psu = psu.lock().await;
+            let locked_psu = psu.lock().await;
             let consumer_capability = locked_psu.state().consumer_capability;
             // Don't consider consumers below minimum threshold
             if consumer_capability
@@ -210,7 +210,7 @@ where
                 info!("({}): Disconnecting current consumer", current_psu.name());
                 // disconnect current consumer and set idle
                 current_psu.disconnect().await?;
-                if let Err(e) = current_psu.state().disconnect(false) {
+                if let Err(e) = current_psu.state_mut().disconnect(false) {
                     // This should never happen because we check the state above, log an error instead of a panic
                     error!("({}): Disconnect transition failed: {:#?}", current_psu.name(), e);
                 }
@@ -231,7 +231,7 @@ where
         let mut psu = new_consumer.psu.lock().await;
         info!("({}): Connecting new consumer", psu.name());
 
-        if let e @ Err(_) = psu.state().connect_consumer(new_consumer.consumer_power_capability) {
+        if let e @ Err(_) = psu.state_mut().connect_consumer(new_consumer.consumer_power_capability) {
             error!(
                 "(({}): Not ready to connect consumer, state: {:#?}",
                 psu.name(),

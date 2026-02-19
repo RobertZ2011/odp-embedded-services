@@ -80,7 +80,11 @@ impl Psu for Mock<'_> {
         Ok(())
     }
 
-    fn state(&mut self) -> &mut State {
+    fn state(&self) -> &State {
+        &self.state
+    }
+
+    fn state_mut(&mut self) -> &mut State {
         &mut self.state
     }
 

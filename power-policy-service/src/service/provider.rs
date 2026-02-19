@@ -35,7 +35,7 @@ where
     /// Attempt to connect the requester as a provider
     pub(super) async fn connect_provider(&mut self, requester: &'a PSU) -> Result<(), Error> {
         let requested_power_capability = {
-            let mut requester = requester.lock().await;
+            let requester = requester.lock().await;
             debug!("({}): Attempting to connect as provider", requester.name());
             match requester.state().requested_provider_capability {
                 Some(cap) => cap,
@@ -89,7 +89,7 @@ where
         };
 
         let mut locked_requester = requester.lock().await;
-        if let e @ Err(_) = locked_requester.state().connect_provider(target_power) {
+        if let e @ Err(_) = locked_requester.state_mut().connect_provider(target_power) {
             error!(
                 "({}): Cannot provide, device is in state {:#?}",
                 locked_requester.name(),

@@ -90,7 +90,11 @@ impl Psu for ExampleDevice<'_> {
         Ok(())
     }
 
-    fn state(&mut self) -> &mut psu::State {
+    fn state(&self) -> &psu::State {
+        &self.state
+    }
+
+    fn state_mut(&mut self) -> &mut psu::State {
         &mut self.state
     }
 
