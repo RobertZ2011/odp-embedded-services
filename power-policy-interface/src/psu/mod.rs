@@ -274,8 +274,10 @@ pub trait Psu {
     fn connect_provider(&mut self, capability: ProviderPowerCapability) -> impl Future<Output = Result<(), Error>>;
     /// Connect this device to consume power from an external connection
     fn connect_consumer(&mut self, capability: ConsumerPowerCapability) -> impl Future<Output = Result<(), Error>>;
+    /// Return an immutable reference to the current PSU state
+    fn state(&self) -> &State;
     /// Return a mutable reference to the current PSU state
-    fn state(&mut self) -> &mut State;
+    fn state_mut(&mut self) -> &mut State;
     /// Return the name of the PSU
     fn name(&self) -> &'static str;
 }

@@ -105,7 +105,11 @@ impl<'a> Psu for PowerProxyDevice<'a> {
             .complete_or_err()
     }
 
-    fn state(&mut self) -> &mut power_policy_service::psu::State {
+    fn state(&self) -> &power_policy_service::psu::State {
+        &self.psu_state
+    }
+
+    fn state_mut(&mut self) -> &mut power_policy_service::psu::State {
         &mut self.psu_state
     }
 

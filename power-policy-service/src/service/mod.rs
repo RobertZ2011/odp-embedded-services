@@ -104,7 +104,7 @@ where
         let mut total = 0;
 
         for psu in self.psu_devices.iter() {
-            let mut psu = psu.lock().await;
+            let psu = psu.lock().await;
             total += psu
                 .state()
                 .connected_provider_capability()
@@ -118,7 +118,7 @@ where
     async fn process_notify_attach(&self, device: &PSU) {
         let mut device = device.lock().await;
         info!("({}): Received notify attached", device.name());
-        if let Err(e) = device.state().attach() {
+        if let Err(e) = device.state_mut().attach() {
             error!("({}): Invalid state for attach: {:#?}", device.name(), e);
         }
     }
@@ -127,7 +127,7 @@ where
         {
             let mut device = device.lock().await;
             info!("({}): Received notify detached", device.name());
-            device.state().detach();
+            device.state_mut().detach();
         }
         self.update_current_consumer().await
     }
@@ -144,7 +144,7 @@ where
                 device.name(),
                 capability,
             );
-            if let Err(e) = device.state().update_consumer_power_capability(capability) {
+            if let Err(e) = device.state_mut().update_consumer_power_capability(capability) {
                 error!(
                     "({}): Invalid state for notify consumer capability, catching up: {:#?}",
                     device.name(),
@@ -168,7 +168,10 @@ where
                 requester.name(),
                 capability,
             );
-            if let Err(e) = requester.state().update_requested_provider_power_capability(capability) {
+            if let Err(e) = requester
+                .state_mut()
+                .update_requested_provider_power_capability(capability)
+            {
                 error!(
                     "({}): Invalid state for notify consumer capability, catching up: {:#?}",
                     requester.name(),
@@ -184,7 +187,7 @@ where
         let mut locked_device = device.lock().await;
         info!("({}): Received notify disconnect", locked_device.name());
 
-        if let Err(e) = locked_device.state().disconnect(true) {
+        if let Err(e) = locked_device.state_mut().disconnect(true) {
             error!(
                 "({}): Invalid state for notify disconnect, catching up: {:#?}",
                 locked_device.name(),
