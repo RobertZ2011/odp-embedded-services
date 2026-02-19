@@ -1,31 +1,19 @@
 //! Various types of state and objects required for [`crate::wrapper::ControllerWrapper`].
 //!
-//! The wrapper needs per-port state which ultimately needs to come from something like an array.
-//! We need to erase the generic `N` parameter from that storage so as not to monomorphize the entire
-//! wrapper over it. This module provides the necessary types and traits to do so. Things required by
-//! the wrapper can be split into two categories: objects used for service registration (which must be immutable),
-//! and mutable state. These are represented by the [`Registration`] and [`DynPortState`] respectively. The later
-//! is a trait intended to be used as a trait object to erase the generic port count.
-//!
-//! [`Storage`] is the base storage type and is generic over the number of ports. However, there are additional
-//! objects that need to reference the storage. To avoid a self-referential
-//! struct, [`ReferencedStorage`] contains these. This struct is still generic over the number of ports.
-//!
-//! Lastly, [`Backing`] contains references to the registration and type-erased state and is what is passed
-//! to the wrapper.
+//! TODO: update this documentation when the type-C service is refactored
 //!
 //! Example usage:
 //! ```
 //! use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 //! use static_cell::StaticCell;
-//! use crate::type_c::ControllerId;
-//! use embedded_services::power;
 //! use embedded_usb_pd::GlobalPortId;
 //! use type_c_service::wrapper::backing::{Storage, IntermediateStorage, ReferencedStorage};
+//! use type_c_service::type_c::controller;
+//! use type_c_service::type_c::ControllerId;
 //! use embassy_sync::channel::{Channel, DynamicSender};
 //! use power_policy_service::psu;
 //!
-//! fn init(context: &'static crate::type_c::controller::Context) {
+//! fn init(context: &'static controller::Context) {
 //!    static STORAGE: StaticCell<Storage<1, NoopRawMutex>> = StaticCell::new();
 //!    let storage = STORAGE.init(Storage::new(
 //!        context,
@@ -274,11 +262,13 @@ impl<'a, const N: usize, M: RawMutex> ReferencedStorage<'a, N, M> {
                 intermediate.storage.controller_id,
                 intermediate.storage.pd_ports.as_slice(),
             ),
+            // Panic safety: will not panic because array length is fixed by generic argument
+            #[allow(clippy::indexing_slicing)]
             power_devices: from_fn(|i| &intermediate.ports[i].proxy),
         })
     }
 
-    /// Creates the backing, returns `None` if a backing has already been created
+    /// Creates the backing
     pub fn create_backing<'b>(&'b self) -> Backing<'b, M>
     where
         'b: 'a,

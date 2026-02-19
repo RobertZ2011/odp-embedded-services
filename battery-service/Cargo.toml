@@ -24,7 +24,7 @@ log = { workspace = true, optional = true }
 zerocopy.workspace = true
 mctp-rs = { workspace = true, features = ["espi"] }
 heapless.workspace = true
-power-policy-service = { path = "../power-policy-service" }
+power-policy-service.workspace = true
 
 [features]
 default = []
@@ -36,11 +36,13 @@ defmt = [
     "embassy-sync/defmt",
     "embedded-batteries-async/defmt",
     "mctp-rs/defmt",
+    "power-policy-service/defmt",
 ]
 log = [
     "dep:log",
     "embedded-services/log",
     "embassy-time/log",
     "embassy-sync/log",
+    "power-policy-service/log",
 ]
 mock = []

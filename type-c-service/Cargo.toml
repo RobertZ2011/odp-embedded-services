@@ -27,7 +27,7 @@ heapless.workspace = true
 log = { workspace = true, optional = true }
 tps6699x = { workspace = true, features = ["embassy"] }
 cfu-service.workspace = true
-power-policy-service = { path = "../power-policy-service" }
+power-policy-service.workspace = true
 bitvec.workspace = true
 
 [dev-dependencies]
@@ -49,6 +49,7 @@ defmt = [
     "tps6699x/defmt",
     "embedded-usb-pd/defmt",
     "cfu-service/defmt",
+    "power-policy-service/defmt",
 ]
 log = [
     "dep:log",
@@ -57,4 +58,5 @@ log = [
     "embassy-sync/log",
     "tps6699x/log",
     "cfu-service/log",
+    "power-policy-service/log",
 ]

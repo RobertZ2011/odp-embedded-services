@@ -1,8 +1,8 @@
 //! This file implements logic to determine how much power to provide to each connected device.
-//! When total provided power is below [limited_power_threshold_mw](super::Config::limited_power_threshold_mw)
-//! the system is in unlimited power state. In this mode up to [provider_unlimited](super::Config::provider_unlimited)
+//! When total provided power is below [limited_power_threshold_mw](super::config::Config::limited_power_threshold_mw)
+//! the system is in unlimited power state. In this mode up to [provider_unlimited](super::config::Config::provider_unlimited)
 //! is provided to each device. Above this threshold, the system is in limited power state.
-//! In this mode [provider_limited](super::Config::provider_limited) is provided to each device
+//! In this mode [provider_limited](super::config::Config::provider_limited) is provided to each device
 use core::ptr;
 
 use embedded_services::debug;
@@ -56,7 +56,7 @@ where
                 Some(requested_power_capability)
             } else {
                 // Use the device's current working provider capability
-                psu.lock().await.state().requested_provider_capability
+                psu.lock().await.state().connected_provider_capability()
             };
             total_power_mw += target_provider_cap.map_or(0, |cap| cap.capability.max_power_mw());
         }
