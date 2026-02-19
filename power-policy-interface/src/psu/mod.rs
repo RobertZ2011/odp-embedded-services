@@ -58,7 +58,7 @@ pub enum PsuState {
 }
 
 impl PsuState {
-    /// Returns the correpsonding state kind
+    /// Returns the corresponding state kind
     pub fn kind(&self) -> StateKind {
         match self {
             PsuState::Idle => StateKind::Idle,

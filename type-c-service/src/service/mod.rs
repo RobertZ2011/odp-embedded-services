@@ -58,10 +58,8 @@ where
     ///
     /// This is the corresponding publisher to [`Self::power_policy_event_subscriber`], power policy events
     /// will be buffered in the channel until they are brought into the event loop with the subscriber.
-    _power_policy_event_publisher: embedded_services::broadcaster::immediate::Receiver<
-        'a,
-        power_policy_service::service::event::Event<'a, PSU>,
-    >,
+    _power_policy_event_publisher:
+        embedded_services::broadcaster::immediate::Receiver<'a, power_policy_service::service::event::Event<'a, PSU>>,
     /// Power policy event subscriber
     ///
     /// This is the corresponding subscriber to [`Self::power_policy_event_publisher`], needs to be a mutex because getting a message

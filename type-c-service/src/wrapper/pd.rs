@@ -172,7 +172,7 @@ where
         };
 
         let (psu_state, mut port_state) = if let Some(port) = self.ports.get(local_port.0 as usize) {
-            (port.proxy.lock().await.psu_state.clone(), port.state.lock().await)
+            (port.proxy.lock().await.psu_state, port.state.lock().await)
         } else {
             debug!("Invalid port: {:?}", command.port);
             return controller::Response::Port(Err(PdError::InvalidPort));

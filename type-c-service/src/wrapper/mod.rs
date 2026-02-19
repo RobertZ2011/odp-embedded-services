@@ -3,7 +3,7 @@
 //! # Supported service messaging
 //! This struct current currently supports messages from the following services:
 //! * Type-C: [`crate::type_c::controller::Command`]
-//! * Power policy: [`power_policy_service::policy::device::Command`]
+//! * Power policy: [`power_policy_service::psu::Command`]
 //! * CFU: [`cfu_service::Request`]
 //! # Event loop
 //! This struct follows a standard wait/process/finalize event loop.
@@ -95,7 +95,7 @@ impl<'device, M: RawMutex, D: Lockable, V: FwOfferValidator> ControllerWrapper<'
 where
     D::Inner: Controller,
 {
-    /// Create a new controller wrapper, returns `None` if the backing storage is already in use
+    /// Create a new controller wrapper
     pub fn new<const N: usize>(
         controller: &'device D,
         config: config::Config,
@@ -367,11 +367,11 @@ where
         // This loop is to ensure that if we finish streaming events we go back to waiting for the next port event
         loop {
             let event = {
-                let mut controller_state = self.controller_state.lock().await;
+                let controller_state = self.controller_state.lock().await;
                 let mut controller = self.controller.lock().await;
                 // DROP SAFETY: Select over drop safe functions
                 select5(
-                    self.wait_port_pending(&mut controller_state, &mut controller),
+                    self.wait_port_pending(&controller_state, &mut controller),
                     self.wait_power_command(),
                     self.registration.pd_controller.receive(),
                     self.wait_cfu_command(),
