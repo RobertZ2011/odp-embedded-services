@@ -7,20 +7,20 @@ repository = "https://github.com/OpenDevicePartnership/embedded-services"
 rust-version = "1.88"
 license = "MIT"
 
+[package.metadata.cargo-machete]
+ignored = ["log"]
+
 [dependencies]
 defmt = { workspace = true, optional = true }
 log = { workspace = true, optional = true }
 embassy-futures.workspace = true
 embassy-sync.workspace = true
 embassy-time.workspace = true
-embedded-hal-async.workspace = true
-embedded-hal.workspace = true
 embedded-services.workspace = true
 heapless.workspace = true
 uuid.workspace = true
 embedded-fans-async = "0.2.0"
 embedded-sensors-hal-async = "0.3.0"
-mctp-rs = { workspace = true, features = ["espi"] }
 
 [features]
 default = []
@@ -31,7 +31,6 @@ defmt = [
     "embassy-sync/defmt",
     "embedded-fans-async/defmt",
     "embedded-sensors-hal-async/defmt",
-    "mctp-rs/defmt",
 ]
 log = [
     "dep:log",
