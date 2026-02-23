@@ -244,6 +244,33 @@ where
             .get_power_device(local_port_id)
             .ok_or(Error::Pd(PdError::InvalidPort))?;
         trace!("Port{} status events: {:#?}", global_port_id.0, status_event);
+
+        if status_event.pd_hard_reset() {
+            info!("Port{}: PD hard reset", global_port_id.0);
+
+            if let Ok(connected_consumer) = power.try_device_action::<action::ConnectedConsumer>().await {
+                info!("Port{}: Disabling sink path due to PD hard reset", global_port_id.0);
+                // Vbus drops to 0V during a hard reset, stop drawing power
+                controller.enable_sink_path(local_port_id, false).await?;
+                if let Err(e) = connected_consumer.disconnect().await {
+                    error!(
+                        "Port{}: Error disconnecting from ConnectedConsumer after PD hard reset: {:#?}",
+                        global_port_id.0, e
+                    );
+                    return PdError::Failed.into();
+                }
+            } else if let Ok(connected_provider) = power.try_device_action::<action::ConnectedProvider>().await {
+                info!("Port{}: Disconnecting provider after hard reset", global_port_id.0);
+                if let Err(e) = connected_provider.disconnect().await {
+                    error!(
+                        "Port{}: Error disconnecting from ConnectedProvider after PD hard reset: {:#?}",
+                        global_port_id.0, e
+                    );
+                    return PdError::Failed.into();
+                }
+            }
+        }
+
         if status_event.plug_inserted_or_removed() {
             self.process_plug_event(controller, power, local_port_id, &status)
                 .await?;
