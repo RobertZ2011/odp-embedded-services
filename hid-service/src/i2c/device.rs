@@ -11,17 +11,17 @@ use crate::Error;
 
 /// Timeout configuration for I2C HID device operations.
 pub struct Config {
-    /// Timeout in milliseconds for descriptor reads and commands.
-    pub device_response_timeout_ms: u64,
-    /// Timeout in milliseconds for input reports and feature data reads.
-    pub data_read_timeout_ms: u64,
+    /// Timeout for descriptor reads and commands.
+    pub device_response_timeout: Duration,
+    /// Timeout for input reports and feature data reads.
+    pub data_read_timeout: Duration,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            device_response_timeout_ms: 200,
-            data_read_timeout_ms: 50,
+            device_response_timeout: Duration::from_millis(200),
+            data_read_timeout: Duration::from_millis(50),
         }
     }
 }
@@ -75,7 +75,7 @@ impl<A: AddressMode + Copy, B: I2c<A>> Device<A, B> {
 
         reg.copy_from_slice(&self.device.regs.hid_desc_reg.to_le_bytes());
         with_timeout(
-            Duration::from_millis(self.timeout_config.device_response_timeout_ms),
+            self.timeout_config.device_response_timeout,
             bus.write_read(self.address, &reg, buf),
         )
         .await
@@ -126,7 +126,7 @@ impl<A: AddressMode + Copy, B: I2c<A>> Device<A, B> {
 
         let mut bus = self.bus.lock().await;
         with_timeout(
-            Duration::from_millis(self.timeout_config.device_response_timeout_ms),
+            self.timeout_config.device_response_timeout,
             bus.write_read(
                 self.address,
                 &reg,
@@ -165,19 +165,16 @@ impl<A: AddressMode + Copy, B: I2c<A>> Device<A, B> {
             })))?;
 
         let mut bus = self.bus.lock().await;
-        with_timeout(
-            Duration::from_millis(self.timeout_config.data_read_timeout_ms),
-            bus.read(self.address, buf),
-        )
-        .await
-        .map_err(|_| {
-            error!("Read input report timeout");
-            Error::Hid(hid::Error::Timeout)
-        })?
-        .map_err(|e| {
-            error!("Failed to read input report");
-            Error::Bus(e)
-        })?;
+        with_timeout(self.timeout_config.data_read_timeout, bus.read(self.address, buf))
+            .await
+            .map_err(|_| {
+                error!("Read input report timeout");
+                Error::Hid(hid::Error::Timeout)
+            })?
+            .map_err(|e| {
+                error!("Failed to read input report");
+                Error::Bus(e)
+            })?;
 
         self.buffer
             .reference()
@@ -216,7 +213,7 @@ impl<A: AddressMode + Copy, B: I2c<A>> Device<A, B> {
 
         let mut bus = self.bus.lock().await;
         with_timeout(
-            Duration::from_millis(self.timeout_config.device_response_timeout_ms),
+            self.timeout_config.device_response_timeout,
             bus.write(
                 self.address,
                 buf.get(..len)
@@ -238,19 +235,16 @@ impl<A: AddressMode + Copy, B: I2c<A>> Device<A, B> {
 
         if opcode.has_response() {
             trace!("Reading host data");
-            with_timeout(
-                Duration::from_millis(self.timeout_config.data_read_timeout_ms),
-                bus.read(self.address, buf),
-            )
-            .await
-            .map_err(|_| {
-                error!("Read host data timeout");
-                Error::Hid(hid::Error::Timeout)
-            })?
-            .map_err(|e| {
-                error!("Failed to read host data");
-                Error::Bus(e)
-            })?;
+            with_timeout(self.timeout_config.data_read_timeout, bus.read(self.address, buf))
+                .await
+                .map_err(|_| {
+                    error!("Read host data timeout");
+                    Error::Hid(hid::Error::Timeout)
+                })?
+                .map_err(|e| {
+                    error!("Failed to read host data");
+                    Error::Bus(e)
+                })?;
 
             return Ok(Some(Response::FeatureReport(self.buffer.reference())));
         }
