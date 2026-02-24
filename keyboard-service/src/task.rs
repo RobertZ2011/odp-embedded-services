@@ -33,7 +33,7 @@ macro_rules! impl_host_request_task {
                 keyboard_service::HID_KB_ID,
                 kb_i2c,
                 buf,
-                hid_service::i2c::HostTimeoutConfig::default(),
+                hid_service::i2c::HostConfig::default(),
             );
             let host = HOST.init(host);
 

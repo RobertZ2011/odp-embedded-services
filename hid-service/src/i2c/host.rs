@@ -14,14 +14,14 @@ use super::{Command as I2cCommand, I2cSlaveAsync};
 use crate::Error;
 
 /// Timeout configuration for I2C HID host operations.
-pub struct HostTimeoutConfig {
+pub struct Config {
     /// Timeout in milliseconds for device response reads.
     pub device_response_timeout_ms: u64,
     /// Timeout in milliseconds for data reads from the host.
     pub data_read_timeout_ms: u64,
 }
 
-impl Default for HostTimeoutConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
             device_response_timeout_ms: 200,
@@ -42,11 +42,11 @@ pub struct Host<B: I2cSlaveAsync> {
     response: Signal<GlobalRawMutex, Option<hid::Response<'static>>>,
     buffer: OwnedRef<'static, u8>,
     bus: Mutex<GlobalRawMutex, B>,
-    timeout_config: HostTimeoutConfig,
+    timeout_config: Config,
 }
 
 impl<B: I2cSlaveAsync> Host<B> {
-    pub fn new(id: DeviceId, bus: B, buffer: OwnedRef<'static, u8>, timeout_config: HostTimeoutConfig) -> Self {
+    pub fn new(id: DeviceId, bus: B, buffer: OwnedRef<'static, u8>, timeout_config: Config) -> Self {
         Host {
             id,
             tp: Endpoint::uninit(EndpointID::External(External::Host)),

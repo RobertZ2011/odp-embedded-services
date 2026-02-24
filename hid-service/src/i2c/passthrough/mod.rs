@@ -8,7 +8,7 @@ macro_rules! define_i2c_passthrough_device_task {
         pub async fn device_task(bus: $bus, id: ::embedded_services::hid::DeviceId, addr: u8) {
             use ::embassy_sync::once_lock::OnceLock;
             use ::embedded_services::{define_static_buffer, error, hid, info};
-            use $crate::i2c::{Device, DeviceTimeoutConfig};
+            use $crate::i2c::{Device, DeviceConfig};
             define_static_buffer!(gen_buffer, u8, [0; 512]);
             let gen_buffer = gen_buffer::get_mut().unwrap();
 
@@ -21,7 +21,7 @@ macro_rules! define_i2c_passthrough_device_task {
                     bus,
                     Default::default(),
                     gen_buffer,
-                    DeviceTimeoutConfig::default(),
+                    DeviceConfig::default(),
                 )
             });
             hid::register_device(device).await.unwrap();
@@ -46,7 +46,7 @@ macro_rules! define_i2c_passthrough_host_task {
         ) {
             use ::embassy_sync::once_lock::OnceLock;
             use ::embedded_services::{comms, define_static_buffer, error, info};
-            use $crate::i2c::{Host, HostTimeoutConfig};
+            use $crate::i2c::{Host, HostConfig};
 
             info!("Creating HIDI2C Host");
             define_static_buffer!(host_buffer, u8, [0; 128]);
@@ -56,7 +56,7 @@ macro_rules! define_i2c_passthrough_host_task {
                     HID_ID0,
                     bus,
                     host_buffer::get_mut().unwrap(),
-                    HostTimeoutConfig::default(),
+                    HostConfig::default(),
                 )
             });
             comms::register_endpoint(host, &host.tp).await.unwrap();

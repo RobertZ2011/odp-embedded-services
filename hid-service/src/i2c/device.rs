@@ -10,14 +10,14 @@ use embedded_services::{error, hid, info, trace};
 use crate::Error;
 
 /// Timeout configuration for I2C HID device operations.
-pub struct DeviceTimeoutConfig {
+pub struct Config {
     /// Timeout in milliseconds for descriptor reads and commands.
     pub device_response_timeout_ms: u64,
     /// Timeout in milliseconds for input reports and feature data reads.
     pub data_read_timeout_ms: u64,
 }
 
-impl Default for DeviceTimeoutConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
             device_response_timeout_ms: 200,
@@ -32,7 +32,7 @@ pub struct Device<A: AddressMode + Copy, B: I2c<A>> {
     address: A,
     descriptor: Mutex<GlobalRawMutex, Option<hid::Descriptor>>,
     bus: Mutex<GlobalRawMutex, B>,
-    timeout_config: DeviceTimeoutConfig,
+    timeout_config: Config,
 }
 
 impl<A: AddressMode + Copy, B: I2c<A>> Device<A, B> {
@@ -42,7 +42,7 @@ impl<A: AddressMode + Copy, B: I2c<A>> Device<A, B> {
         bus: B,
         regs: hid::RegisterFile,
         buffer: OwnedRef<'static, u8>,
-        timeout_config: DeviceTimeoutConfig,
+        timeout_config: Config,
     ) -> Self {
         Self {
             device: hid::Device::new(id, regs),
