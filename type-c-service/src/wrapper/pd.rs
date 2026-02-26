@@ -2,6 +2,7 @@ use embassy_futures::yield_now;
 use embassy_sync::pubsub::WaitResult;
 use embassy_time::{Duration, Timer};
 use embedded_services::debug;
+use embedded_services::power::policy::PowerCapability;
 use embedded_services::type_c::Cached;
 use embedded_services::type_c::controller::{InternalResponseData, Response};
 use embedded_usb_pd::constants::{T_PS_TRANSITION_EPR_MS, T_PS_TRANSITION_SPR_MS};
@@ -48,36 +49,50 @@ where
         state: &mut dyn DynPortState<'_>,
         status: &PortStatus,
         port: LocalPortId,
-        new_contract: bool,
+        new_contract: Option<PowerCapability>,
         sink_ready: bool,
     ) -> Result<(), PdError> {
         if port.0 as usize >= state.num_ports() {
             return Err(PdError::InvalidPort);
         }
 
-        let deadline = &mut state
+        let port_state = state
             .port_states_mut()
             .get_mut(port.0 as usize)
-            .ok_or(PdError::InvalidPort)?
-            .sink_ready_deadline;
+            .ok_or(PdError::InvalidPort)?;
 
-        if new_contract && !sink_ready {
-            // Start the timeout
-            // Double the spec maximum transition time to provide a safety margin for hardware/controller delays our out-of-spec controllers.
-            let timeout_ms = if status.epr {
-                T_PS_TRANSITION_EPR_MS
+        let available_sink_contract = port_state.status.available_sink_contract;
+        let deadline = &mut port_state.sink_ready_deadline;
+
+        // Check if we need to start the timeout
+        if let Some(new_contract) = new_contract {
+            let contract_changed = Some(new_contract) != available_sink_contract;
+
+            // Don't start the timeout if the sink is already ready or if the contract didn't change.
+            // The latter ensures that soft resets won't continually reset the ready timeout
+            if !sink_ready && contract_changed {
+                // Start the timeout
+                // Double the spec maximum transition time to provide a safety margin for hardware/controller delays our out-of-spec controllers.
+                let timeout_ms = if status.epr {
+                    T_PS_TRANSITION_EPR_MS
+                } else {
+                    T_PS_TRANSITION_SPR_MS
+                }
+                .maximum
+                .0 * 2;
+
+                debug!("Port{}: Sink ready timeout started for {}ms", port.0, timeout_ms);
+                *deadline = Some(Instant::now() + Duration::from_millis(timeout_ms as u64));
             } else {
-                T_PS_TRANSITION_SPR_MS
+                debug!(
+                    "Port{}: Not starting sink ready timeout, sink_ready: {}, contract_changed: {}",
+                    port.0, sink_ready, contract_changed
+                );
             }
-            .maximum
-            .0 * 2;
+        }
 
-            debug!("Port{}: Sink ready timeout started for {}ms", port.0, timeout_ms);
-            *deadline = Some(Instant::now() + Duration::from_millis(timeout_ms as u64));
-        } else if deadline.is_some()
-            && (!status.is_connected() || status.available_sink_contract.is_none() || sink_ready)
-        {
-            // Clear the timeout
+        // Check if we need to clear the timeout
+        if deadline.is_some() && (!status.is_connected() || status.available_sink_contract.is_none() || sink_ready) {
             debug!("Port{}: Sink ready timeout cleared", port.0);
             *deadline = None;
         }
