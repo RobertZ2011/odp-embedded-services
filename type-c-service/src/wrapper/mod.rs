@@ -262,10 +262,7 @@ where
             state,
             &status,
             local_port_id,
-            status_event
-                .new_power_contract_as_consumer()
-                .then_some(status.available_sink_contract)
-                .flatten(),
+            status_event.new_power_contract_as_consumer(),
             status_event.sink_ready(),
         )?;
 
