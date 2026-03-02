@@ -7,9 +7,10 @@ use embassy_sync::once_lock::OnceLock;
 use embassy_sync::{channel::Channel, mutex::Mutex, signal::Signal};
 use embassy_time::{Duration, with_timeout};
 use embedded_services::GlobalRawMutex;
-use power_policy_service::psu::event::EventData;
+use power_policy_interface::capability::PowerCapability;
+use power_policy_interface::psu::event::EventData;
+use power_policy_service::psu::EventReceivers;
 use power_policy_service::service::Service;
-use power_policy_service::{capability::PowerCapability, psu::event::EventReceivers};
 
 pub mod mock;
 

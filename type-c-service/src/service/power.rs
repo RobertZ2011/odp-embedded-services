@@ -1,5 +1,5 @@
 use embassy_sync::pubsub::WaitResult;
-use power_policy_service::service as power_policy;
+use power_policy_interface::service as power_policy;
 
 use super::*;
 
@@ -16,13 +16,13 @@ where
                     error!("Power policy {} event(s) lagged", lagged);
                 }
                 WaitResult::Message(message) => match message {
-                    power_policy_service::service::event::Event::Unconstrained(state) => {
+                    power_policy_interface::service::event::Event::Unconstrained(state) => {
                         return Event::PowerPolicy(PowerPolicyEvent::Unconstrained(state));
                     }
-                    power_policy_service::service::event::Event::ConsumerDisconnected(_) => {
+                    power_policy_interface::service::event::Event::ConsumerDisconnected(_) => {
                         return Event::PowerPolicy(PowerPolicyEvent::ConsumerDisconnected);
                     }
-                    power_policy_service::service::event::Event::ConsumerConnected(_, _) => {
+                    power_policy_interface::service::event::Event::ConsumerConnected(_, _) => {
                         return Event::PowerPolicy(PowerPolicyEvent::ConsumerConnected);
                     }
                     _ => {

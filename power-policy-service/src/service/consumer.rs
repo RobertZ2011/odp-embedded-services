@@ -3,10 +3,10 @@ use embedded_services::{debug, error};
 
 use super::*;
 
-use crate::capability::ConsumerFlags;
-use crate::charger::Device as ChargerDevice;
-use crate::service::event::Event as ServiceEvent;
-use crate::{capability::ConsumerPowerCapability, charger::PolicyEvent, psu::PsuState};
+use power_policy_interface::capability::ConsumerFlags;
+use power_policy_interface::charger::Device as ChargerDevice;
+use power_policy_interface::service::event::Event as ServiceEvent;
+use power_policy_interface::{capability::ConsumerPowerCapability, charger::PolicyEvent, psu::PsuState};
 
 /// State of the current consumer
 #[derive(Debug, PartialEq, Eq)]
@@ -142,7 +142,7 @@ where
         for node in self.context.charger_devices() {
             let device = node.data::<ChargerDevice>().ok_or(Error::InvalidDevice)?;
             // Chargers should be powered at this point, but in case they are not...
-            if let crate::charger::ChargerResponseData::UnpoweredAck = device
+            if let power_policy_interface::charger::ChargerResponseData::UnpoweredAck = device
                 .execute_command(PolicyEvent::PolicyConfiguration(
                     connected_consumer.consumer_power_capability,
                 ))
@@ -173,7 +173,7 @@ where
     pub(super) async fn disconnect_chargers(&self) -> Result<(), Error> {
         for node in self.context.charger_devices() {
             let device = node.data::<ChargerDevice>().ok_or(Error::InvalidDevice)?;
-            if let crate::charger::ChargerResponseData::UnpoweredAck = device
+            if let power_policy_interface::charger::ChargerResponseData::UnpoweredAck = device
                 .execute_command(PolicyEvent::PolicyConfiguration(ConsumerPowerCapability {
                     capability: PowerCapability {
                         voltage_mv: 0,
@@ -233,7 +233,7 @@ where
 
         if let e @ Err(_) = psu.state_mut().connect_consumer(new_consumer.consumer_power_capability) {
             error!(
-                "(({}): Not ready to connect consumer, state: {:#?}",
+                "({}): Not ready to connect consumer, state: {:#?}",
                 psu.name(),
                 psu.state().psu_state
             );

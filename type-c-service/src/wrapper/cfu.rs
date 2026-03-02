@@ -144,11 +144,11 @@ where
             for port in self.ports {
                 let (port_state, port_proxy) = (port.state.lock().await, port.proxy.lock().await);
                 info!("Controller{}: checking power device", controller_id.0);
-                if port_proxy.psu_state.psu_state != power_policy_service::psu::PsuState::Detached {
+                if port_proxy.psu_state.psu_state != power_policy_interface::psu::PsuState::Detached {
                     info!("Controller{}: Detaching power device", controller_id.0);
                     port_state
                         .power_policy_sender
-                        .send(power_policy_service::psu::event::EventData::Detached)
+                        .send(power_policy_interface::psu::event::EventData::Detached)
                         .await;
                 }
             }

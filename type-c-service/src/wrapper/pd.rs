@@ -7,7 +7,7 @@ use embassy_time::{Duration, Timer};
 use embedded_services::debug;
 use embedded_usb_pd::constants::{T_PS_TRANSITION_EPR_MS, T_PS_TRANSITION_SPR_MS};
 use embedded_usb_pd::ucsi::{self, lpm};
-use power_policy_service::psu::{self, PsuState};
+use power_policy_interface::psu::{self, PsuState};
 
 use super::*;
 
@@ -118,7 +118,7 @@ where
                 );
                 port_state
                     .power_policy_sender
-                    .send(power_policy_service::psu::event::EventData::Disconnected)
+                    .send(power_policy_interface::psu::event::EventData::Disconnected)
                     .await;
             }
         }

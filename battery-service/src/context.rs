@@ -9,7 +9,7 @@ use embassy_sync::signal::Signal;
 use embassy_time::{Duration, with_timeout};
 use embedded_services::GlobalRawMutex;
 use embedded_services::{IntrusiveList, debug, error, info, intrusive_list, trace, warn};
-use power_policy_service::capability::PowerCapability;
+use power_policy_interface::capability::PowerCapability;
 
 use core::ops::DerefMut;
 use core::sync::atomic::AtomicUsize;

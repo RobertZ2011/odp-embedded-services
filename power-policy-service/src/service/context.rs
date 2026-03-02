@@ -1,9 +1,8 @@
 //! Context for any power policy implementations
-use crate::charger;
-
-use crate::charger::ChargerResponse;
-use crate::psu::Error;
 use embedded_services::{error, intrusive_list};
+use power_policy_interface::charger;
+use power_policy_interface::charger::ChargerResponse;
+use power_policy_interface::psu::Error;
 
 /// Power policy context
 pub struct Context {

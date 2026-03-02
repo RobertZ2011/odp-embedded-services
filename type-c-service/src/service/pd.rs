@@ -2,7 +2,7 @@
 
 use embedded_services::{intrusive_list, sync::Lockable};
 use embedded_usb_pd::{GlobalPortId, PdError, ado::Ado};
-use power_policy_service::psu;
+use power_policy_interface::psu;
 
 use super::Service;
 

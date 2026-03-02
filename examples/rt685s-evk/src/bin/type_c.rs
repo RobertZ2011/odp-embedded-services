@@ -9,7 +9,7 @@ use embassy_imxrt::gpio::{Input, Inverter, Pull};
 use embassy_imxrt::i2c::Async;
 use embassy_imxrt::i2c::master::{Config, I2cMaster};
 use embassy_imxrt::{bind_interrupts, peripherals};
-use embassy_sync::channel::{Channel};
+use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::once_lock::OnceLock;
 use embassy_sync::pubsub::PubSubChannel;
@@ -18,7 +18,8 @@ use embedded_cfu_protocol::protocol_definitions::{FwUpdateOffer, FwUpdateOfferRe
 use embedded_services::{GlobalRawMutex, IntrusiveList};
 use embedded_services::{error, info};
 use embedded_usb_pd::GlobalPortId;
-use power_policy_service::psu;
+use power_policy_interface::psu;
+use power_policy_service::psu::EventReceivers;
 use static_cell::StaticCell;
 use tps6699x::asynchronous::embassy as tps6699x;
 use type_c_service::driver::tps6699x::{self as tps6699x_drv};
@@ -53,12 +54,7 @@ impl type_c_service::wrapper::FwOfferValidator for Validator {
 type BusMaster<'a> = I2cMaster<'a, Async>;
 type BusDevice<'a> = I2cDevice<'a, GlobalRawMutex, BusMaster<'a>>;
 type Tps6699xMutex<'a> = Mutex<GlobalRawMutex, tps6699x_drv::Tps6699x<'a, GlobalRawMutex, BusDevice<'a>>>;
-type Wrapper<'a> = ControllerWrapper<
-    'a,
-    GlobalRawMutex,
-    Tps6699xMutex<'a>,
-    Validator,
->;
+type Wrapper<'a> = ControllerWrapper<'a, GlobalRawMutex, Tps6699xMutex<'a>, Validator>;
 type Controller<'a> = tps6699x::controller::Controller<GlobalRawMutex, BusDevice<'a>>;
 type Interrupt<'a> = tps6699x::Interrupt<'a, GlobalRawMutex, BusDevice<'a>>;
 
@@ -78,7 +74,7 @@ async fn interrupt_task(mut int_in: Input<'static>, mut interrupt: Interrupt<'st
 
 #[embassy_executor::task]
 async fn power_policy_task(
-    psu_events: psu::event::EventReceivers<'static, 2, DeviceType>,
+    psu_events: EventReceivers<'static, 2, DeviceType>,
     power_policy: &'static Mutex<GlobalRawMutex, power_policy_service::service::Service<'static, DeviceType>>,
 ) {
     power_policy_service::service::task::task(psu_events, power_policy).await;
@@ -88,11 +84,10 @@ async fn power_policy_task(
 async fn type_c_service_task(
     service: &'static Service<'static, DeviceType>,
     wrappers: [&'static Wrapper<'static>; NUM_PD_CONTROLLERS],
-    power_policy_context: &'static power_policy_service::service::context::Context,
     cfu_client: &'static CfuClient,
 ) {
     info!("Starting type-c task");
-    type_c_service::task::task(service, wrappers, power_policy_context, cfu_client).await;
+    type_c_service::task::task(service, wrappers, cfu_client).await;
 }
 
 #[embassy_executor::main]
@@ -159,18 +154,14 @@ async fn main(spawner: Spawner) {
     let policy_sender1 = policy_channel1.dyn_sender();
     let policy_receiver1 = policy_channel1.dyn_receiver();
 
-    static INTERMEDIATE: StaticCell<
-        IntermediateStorage<TPS66994_NUM_PORTS, GlobalRawMutex>,
-    > = StaticCell::new();
+    static INTERMEDIATE: StaticCell<IntermediateStorage<TPS66994_NUM_PORTS, GlobalRawMutex>> = StaticCell::new();
     let intermediate = INTERMEDIATE.init(
         storage
             .try_create_intermediate([("Pd0", policy_sender0), ("Pd1", policy_sender1)])
             .expect("Failed to create intermediate storage"),
     );
 
-    static REFERENCED: StaticCell<
-        ReferencedStorage<TPS66994_NUM_PORTS, GlobalRawMutex>,
-    > = StaticCell::new();
+    static REFERENCED: StaticCell<ReferencedStorage<TPS66994_NUM_PORTS, GlobalRawMutex>> = StaticCell::new();
     let referenced = REFERENCED.init(
         intermediate
             .try_create_referenced()
@@ -191,7 +182,7 @@ async fn main(spawner: Spawner) {
 
     // The service is the only receiver and we only use a DynImmediatePublisher, which doesn't take a publisher slot
     static POWER_POLICY_CHANNEL: StaticCell<
-        PubSubChannel<GlobalRawMutex, power_policy_service::service::event::Event<'static, DeviceType>, 4, 1, 0>,
+        PubSubChannel<GlobalRawMutex, power_policy_interface::service::event::Event<'static, DeviceType>, 4, 1, 0>,
     > = StaticCell::new();
 
     let power_policy_channel = POWER_POLICY_CHANNEL.init(PubSubChannel::new());
@@ -228,16 +219,11 @@ async fn main(spawner: Spawner) {
     let cfu_client = CfuClient::new(&CFU_CLIENT).await;
 
     info!("Spawining type-c service task");
-    spawner.must_spawn(type_c_service_task(
-        type_c_service,
-        [wrapper],
-        power_service_context,
-        cfu_client,
-    ));
+    spawner.must_spawn(type_c_service_task(type_c_service, [wrapper], cfu_client));
 
     info!("Spawining power policy task");
     spawner.must_spawn(power_policy_task(
-        psu::event::EventReceivers::new(
+        EventReceivers::new(
             [&wrapper.ports[0].proxy, &wrapper.ports[1].proxy],
             [policy_receiver0, policy_receiver1],
         ),

@@ -3,7 +3,7 @@
 use crate::type_c::controller::{AttnVdm, OtherVdm};
 use embedded_services::{intrusive_list, sync::Lockable};
 use embedded_usb_pd::{GlobalPortId, PdError};
-use power_policy_service::psu;
+use power_policy_interface::psu;
 
 use super::Service;
 

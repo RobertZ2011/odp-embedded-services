@@ -2,48 +2,6 @@
 //!
 //! TODO: update this documentation when the type-C service is refactored
 //!
-//! Example usage:
-//! ```
-//! use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-//! use static_cell::StaticCell;
-//! use embedded_usb_pd::GlobalPortId;
-//! use type_c_service::wrapper::backing::{Storage, IntermediateStorage, ReferencedStorage};
-//! use type_c_service::type_c::controller;
-//! use type_c_service::type_c::ControllerId;
-//! use embassy_sync::channel::{Channel, DynamicSender};
-//! use power_policy_service::psu;
-//!
-//! fn init(context: &'static controller::Context) {
-//!    static STORAGE: StaticCell<Storage<1, NoopRawMutex>> = StaticCell::new();
-//!    let storage = STORAGE.init(Storage::new(
-//!        context,
-//!        ControllerId(0),
-//!        0x0, // CFU component ID (unused)
-//!        [GlobalPortId(0)],
-//!    ));
-//!
-//!    static POLICY_CHANNEL: StaticCell<Channel<NoopRawMutex, psu::event::EventData, 1>> = StaticCell::new();
-//!    let policy_channel = POLICY_CHANNEL.init(Channel::new());
-//!    let policy_sender = policy_channel.dyn_sender();
-//!
-//!    static INTERMEDIATE: StaticCell<IntermediateStorage<1, NoopRawMutex>> =
-//!        StaticCell::new();
-//!    let intermediate = INTERMEDIATE.init(
-//!        storage
-//!            .try_create_intermediate([("Pd0", policy_sender)])
-//!            .expect("Failed to create intermediate storage"),
-//!    );
-//!
-//!    static REFERENCED: StaticCell<
-//!        ReferencedStorage<1, NoopRawMutex>,
-//!    > = StaticCell::new();
-//!    let referenced = REFERENCED.init(
-//!        intermediate
-//!            .try_create_referenced()
-//!            .expect("Failed to create referenced storage"),
-//!    );
-//! }
-//! ```
 use core::array::from_fn;
 
 use cfu_service::component::CfuDevice;
@@ -142,7 +100,7 @@ impl<'a, const N: usize, M: RawMutex> Storage<'a, N, M> {
         &'a self,
         power_policy_init: [(
             &'static str,
-            DynamicSender<'a, power_policy_service::psu::event::EventData>,
+            DynamicSender<'a, power_policy_interface::psu::event::EventData>,
         ); N],
     ) -> Option<IntermediateStorage<'a, N, M>> {
         IntermediateStorage::try_from_storage(self, power_policy_init)
@@ -168,13 +126,13 @@ pub struct PortState<'a> {
     // so we use that, but this requires us to keep separate publisher and subscriber objects.
     pub(crate) pd_alerts: (DynImmediatePublisher<'a, Ado>, DynSubscriber<'a, Ado>),
     /// Sender to send events to the power policy service
-    pub(crate) power_policy_sender: DynamicSender<'a, power_policy_service::psu::event::EventData>,
+    pub(crate) power_policy_sender: DynamicSender<'a, power_policy_interface::psu::event::EventData>,
 }
 
 impl<'a> PortState<'a> {
     pub fn new(
         pd_alerts: (DynImmediatePublisher<'a, Ado>, DynSubscriber<'a, Ado>),
-        power_policy_sender: DynamicSender<'a, power_policy_service::psu::event::EventData>,
+        power_policy_sender: DynamicSender<'a, power_policy_interface::psu::event::EventData>,
     ) -> Self {
         Self {
             status: PortStatus::default(),
@@ -199,7 +157,7 @@ impl<'a, const N: usize, M: RawMutex> IntermediateStorage<'a, N, M> {
         storage: &'a Storage<'a, N, M>,
         power_policy_init: [(
             &'static str,
-            DynamicSender<'a, power_policy_service::psu::event::EventData>,
+            DynamicSender<'a, power_policy_interface::psu::event::EventData>,
         ); N],
     ) -> Option<Self> {
         let mut ports = heapless::Vec::<_, N>::new();

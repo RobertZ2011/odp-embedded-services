@@ -14,8 +14,9 @@ use embedded_usb_pd::ucsi::ppm::get_capability::ResponseData as UcsiCapabilities
 use embedded_usb_pd::ucsi::ppm::set_notification_enable::NotificationEnable;
 use embedded_usb_pd::ucsi::{Command, lpm, ppm};
 use log::*;
-use power_policy_service::capability::PowerCapability;
-use power_policy_service::psu;
+use power_policy_interface::capability::PowerCapability;
+use power_policy_interface::psu;
+use power_policy_service::psu::EventReceivers;
 use static_cell::StaticCell;
 use std_examples::type_c::mock_controller;
 use type_c_service::service::Service;
@@ -178,7 +179,7 @@ async fn wrapper_task(wrapper: &'static mock_controller::Wrapper<'static>) {
 
 #[embassy_executor::task]
 async fn power_policy_task(
-    psu_events: psu::event::EventReceivers<'static, 2, DeviceType>,
+    psu_events: EventReceivers<'static, 2, DeviceType>,
     power_policy: &'static Mutex<GlobalRawMutex, power_policy_service::service::Service<'static, DeviceType>>,
 ) {
     power_policy_service::service::task::task(psu_events, power_policy).await;
@@ -188,11 +189,10 @@ async fn power_policy_task(
 async fn type_c_service_task(
     service: &'static Service<'static, DeviceType>,
     wrappers: [&'static Wrapper<'static>; NUM_PD_CONTROLLERS],
-    power_policy_context: &'static power_policy_service::service::context::Context,
     cfu_client: &'static CfuClient,
 ) {
     info!("Starting type-c task");
-    type_c_service::task::task(service, wrappers, power_policy_context, cfu_client).await;
+    type_c_service::task::task(service, wrappers, cfu_client).await;
 }
 
 #[embassy_executor::task]
@@ -296,7 +296,7 @@ async fn task(spawner: Spawner) {
     // Create type-c service
     // The service is the only receiver and we only use a DynImmediatePublisher, which doesn't take a publisher slot
     static POWER_POLICY_CHANNEL: StaticCell<
-        PubSubChannel<GlobalRawMutex, power_policy_service::service::event::Event<'static, DeviceType>, 4, 1, 0>,
+        PubSubChannel<GlobalRawMutex, power_policy_interface::service::event::Event<'static, DeviceType>, 4, 1, 0>,
     > = StaticCell::new();
 
     let power_policy_channel = POWER_POLICY_CHANNEL.init(PubSubChannel::new());
@@ -341,19 +341,14 @@ async fn task(spawner: Spawner) {
     let cfu_client = CfuClient::new(&CFU_CLIENT).await;
 
     spawner.must_spawn(power_policy_task(
-        psu::event::EventReceivers::new(
+        EventReceivers::new(
             [&wrapper0.ports[0].proxy, &wrapper1.ports[0].proxy],
             [policy_receiver0, policy_receiver1],
         ),
         power_service,
     ));
 
-    spawner.must_spawn(type_c_service_task(
-        type_c_service,
-        [wrapper0, wrapper1],
-        power_service_context,
-        cfu_client,
-    ));
+    spawner.must_spawn(type_c_service_task(type_c_service, [wrapper0, wrapper1], cfu_client));
     spawner.must_spawn(wrapper_task(wrapper0));
     spawner.must_spawn(wrapper_task(wrapper1));
     spawner.must_spawn(opm_task(controller_context, [state0, state1]));

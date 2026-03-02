@@ -1,12 +1,12 @@
 use embedded_services::{error, info, sync::Lockable};
 
-use crate::psu::Psu;
+use power_policy_interface::psu::Psu;
 
 use super::Service;
 
 /// Runs the power policy task.
 pub async fn task<'a, const PSU_COUNT: usize, S: Lockable<Inner = Service<'a, PSU>>, PSU: Lockable>(
-    mut psu_events: crate::psu::event::EventReceivers<'a, PSU_COUNT, PSU>,
+    mut psu_events: crate::psu::EventReceivers<'a, PSU_COUNT, PSU>,
     policy: &'a S,
 ) -> !
 where

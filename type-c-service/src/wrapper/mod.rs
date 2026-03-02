@@ -3,7 +3,6 @@
 //! # Supported service messaging
 //! This struct current currently supports messages from the following services:
 //! * Type-C: [`crate::type_c::controller::Command`]
-//! * Power policy: [`power_policy_service::psu::Command`]
 //! * CFU: [`cfu_service::Request`]
 //! # Event loop
 //! This struct follows a standard wait/process/finalize event loop.
@@ -183,13 +182,13 @@ where
             info!("Plug inserted");
             port_state
                 .power_policy_sender
-                .send(power_policy_service::psu::event::EventData::Attached)
+                .send(power_policy_interface::psu::event::EventData::Attached)
                 .await;
         } else {
             info!("Plug removed");
             port_state
                 .power_policy_sender
-                .send(power_policy_service::psu::event::EventData::Detached)
+                .send(power_policy_interface::psu::event::EventData::Detached)
                 .await;
         }
 

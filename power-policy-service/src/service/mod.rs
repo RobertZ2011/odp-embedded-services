@@ -4,40 +4,19 @@ use core::ptr;
 pub mod config;
 pub mod consumer;
 pub mod context;
-pub mod event;
 pub mod provider;
 pub mod task;
 
 use embedded_services::{error, info, sync::Lockable};
 
-use crate::{
+use power_policy_interface::{
     capability::{ConsumerPowerCapability, PowerCapability, ProviderPowerCapability},
     psu::{
         Error, Psu,
         event::{Event as PsuEvent, EventData as PsuEventData},
     },
-    service::event::Event as ServiceEvent,
+    service::{UnconstrainedState, event::Event as ServiceEvent},
 };
-
-/// Unconstrained state information
-#[derive(Debug, Clone, Default, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct UnconstrainedState {
-    /// Unconstrained state
-    pub unconstrained: bool,
-    /// Available unconstrained devices
-    pub available: usize,
-}
-
-impl UnconstrainedState {
-    /// Create a new unconstrained state
-    pub fn new(unconstrained: bool, available: usize) -> Self {
-        Self {
-            unconstrained,
-            available,
-        }
-    }
-}
 
 const MAX_CONNECTED_PROVIDERS: usize = 4;
 
