@@ -11,13 +11,19 @@ use power_policy_interface::psu::{self, PsuState};
 
 use super::*;
 
-impl<'device, M: RawMutex, D: Lockable, V: FwOfferValidator> ControllerWrapper<'device, M, D, V>
+impl<
+    'device,
+    M: RawMutex,
+    D: Lockable,
+    S: event::Sender<power_policy_interface::psu::event::EventData>,
+    V: FwOfferValidator,
+> ControllerWrapper<'device, M, D, S, V>
 where
     D::Inner: Controller,
 {
     async fn process_get_pd_alert(
         &self,
-        port_state: &mut PortState<'_>,
+        port_state: &mut PortState<'_, S>,
         local_port: LocalPortId,
     ) -> Result<Option<Ado>, PdError> {
         loop {
@@ -40,7 +46,7 @@ where
     /// even for controllers that might not always broadcast sink ready events.
     pub(super) fn check_sink_ready_timeout(
         &self,
-        port_state: &mut PortState<'_>,
+        port_state: &mut PortState<'_, S>,
         status: &PortStatus,
         port: LocalPortId,
         new_contract: bool,
@@ -100,7 +106,7 @@ where
     async fn process_set_max_sink_voltage(
         &self,
         controller: &mut D::Inner,
-        port_state: &mut PortState<'_>,
+        port_state: &mut PortState<'_, S>,
         state: &psu::State,
         local_port: LocalPortId,
         voltage_mv: Option<u16>,
@@ -135,7 +141,7 @@ where
     async fn process_get_port_status(
         &self,
         controller: &mut D::Inner,
-        port_state: &mut PortState<'_>,
+        port_state: &mut PortState<'_, S>,
         local_port: LocalPortId,
         cached: Cached,
     ) -> Result<controller::PortResponseData, PdError> {

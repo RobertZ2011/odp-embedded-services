@@ -14,14 +14,20 @@ use crate::wrapper::config::UnconstrainedSink;
 
 use super::*;
 
-impl<'device, M: RawMutex, D: Lockable, V: FwOfferValidator> ControllerWrapper<'device, M, D, V>
+impl<
+    'device,
+    M: RawMutex,
+    D: Lockable,
+    S: event::Sender<power_policy_interface::psu::event::EventData>,
+    V: FwOfferValidator,
+> ControllerWrapper<'device, M, D, S, V>
 where
     D::Inner: Controller,
 {
     /// Handle a new contract as consumer
     pub(super) async fn process_new_consumer_contract(
         &self,
-        port_state: &mut PortState<'_>,
+        port_state: &mut PortState<'_, S>,
         status: &PortStatus,
     ) -> Result<(), Error<<D::Inner as Controller>::BusError>> {
         info!("Process new consumer contract");
@@ -47,7 +53,7 @@ where
     /// Handle a new contract as provider
     pub(super) async fn process_new_provider_contract(
         &self,
-        port_state: &mut PortState<'_>,
+        port_state: &mut PortState<'_, S>,
         status: &PortStatus,
     ) -> Result<(), Error<<D::Inner as Controller>::BusError>> {
         info!("Process New provider contract");

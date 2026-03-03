@@ -275,7 +275,12 @@ async fn run(spawner: Spawner) {
 
 #[embassy_executor::task]
 async fn power_policy_task(
-    psu_events: crate::EventReceivers<'static, 2, DeviceType>,
+    psu_events: EventReceivers<
+        'static,
+        2,
+        DeviceType,
+        channel::DynamicReceiver<'static, power_policy_interface::psu::event::EventData>,
+    >,
     power_policy: &'static Mutex<GlobalRawMutex, power_policy_service::service::Service<'static, DeviceType>>,
 ) {
     power_policy_service::service::task::task(psu_events, power_policy).await;

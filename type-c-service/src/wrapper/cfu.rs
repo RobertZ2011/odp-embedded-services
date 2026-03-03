@@ -29,7 +29,13 @@ impl FwUpdateState {
     }
 }
 
-impl<'device, M: RawMutex, D: Lockable, V: FwOfferValidator> ControllerWrapper<'device, M, D, V>
+impl<
+    'device,
+    M: RawMutex,
+    D: Lockable,
+    S: event::Sender<power_policy_interface::psu::event::EventData>,
+    V: FwOfferValidator,
+> ControllerWrapper<'device, M, D, S, V>
 where
     D::Inner: Controller,
 {
@@ -142,7 +148,7 @@ where
             // Detach from the power policy so it doesn't attempt to do anything while we are updating
             let controller_id = self.registration.pd_controller.id();
             for port in self.ports {
-                let (port_state, port_proxy) = (port.state.lock().await, port.proxy.lock().await);
+                let (mut port_state, port_proxy) = (port.state.lock().await, port.proxy.lock().await);
                 info!("Controller{}: checking power device", controller_id.0);
                 if port_proxy.psu_state.psu_state != power_policy_interface::psu::PsuState::Detached {
                     info!("Controller{}: Detaching power device", controller_id.0);

@@ -15,6 +15,7 @@ pub mod activity;
 pub mod broadcaster;
 pub mod buffer;
 pub mod comms;
+pub mod event;
 pub mod fmt;
 pub mod hid;
 pub mod init;

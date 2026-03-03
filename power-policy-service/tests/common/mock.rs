@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
-use embassy_sync::{channel::DynamicSender, signal::Signal};
-use embedded_services::{GlobalRawMutex, info};
+use embassy_sync::signal::Signal;
+use embedded_services::{GlobalRawMutex, event::Sender, info};
 use power_policy_interface::{
     capability::{ConsumerFlags, ConsumerPowerCapability, PowerCapability, ProviderPowerCapability},
     psu::{Error, Psu, State, event::EventData},
@@ -15,20 +15,16 @@ pub enum FnCall {
     Reset,
 }
 
-pub struct Mock<'a> {
-    sender: DynamicSender<'a, EventData>,
+pub struct Mock<'a, S: Sender<EventData>> {
+    sender: S,
     fn_call: &'a Signal<GlobalRawMutex, (usize, FnCall)>,
     // Internal state
     pub state: State,
     name: &'static str,
 }
 
-impl<'a> Mock<'a> {
-    pub fn new(
-        name: &'static str,
-        sender: DynamicSender<'a, EventData>,
-        fn_call: &'a Signal<GlobalRawMutex, (usize, FnCall)>,
-    ) -> Self {
+impl<'a, S: Sender<EventData>> Mock<'a, S> {
+    pub fn new(name: &'static str, sender: S, fn_call: &'a Signal<GlobalRawMutex, (usize, FnCall)>) -> Self {
         Self {
             name,
             sender,
@@ -61,7 +57,7 @@ impl<'a> Mock<'a> {
     }
 }
 
-impl Psu for Mock<'_> {
+impl<'a, S: Sender<EventData>> Psu for Mock<'a, S> {
     async fn connect_consumer(&mut self, capability: ConsumerPowerCapability) -> Result<(), Error> {
         info!("Connect consumer {:#?}", capability);
         self.record_fn_call(FnCall::ConnectConsumer(capability));

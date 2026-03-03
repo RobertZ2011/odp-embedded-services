@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-use embassy_sync::{mutex::Mutex, signal::Signal};
+use embassy_sync::{channel::DynamicSender, mutex::Mutex, signal::Signal};
 use embassy_time::{Duration, TimeoutError, with_timeout};
 use embedded_services::GlobalRawMutex;
 use embedded_services::info;
@@ -8,6 +8,7 @@ use power_policy_interface::capability::{ConsumerFlags, ConsumerPowerCapability}
 mod common;
 
 use common::LOW_POWER;
+use power_policy_interface::psu::event::EventData;
 
 use crate::common::{
     DEFAULT_TIMEOUT, HIGH_POWER,
@@ -19,10 +20,9 @@ const PER_CALL_TIMEOUT: Duration = Duration::from_millis(1000);
 
 /// Test the basic consumer flow with a single device.
 async fn test_single(
-    device0: &Mutex<GlobalRawMutex, Mock<'_>>,
+    device0: &Mutex<GlobalRawMutex, Mock<'_, DynamicSender<'_, EventData>>>,
     device0_signal: &Signal<GlobalRawMutex, (usize, FnCall)>,
-    // These are unused in this test, but currently has issues with lifetimes of closures, but functions are fine. See https://github.com/rust-lang/rust/issues/70263
-    _device1: &Mutex<GlobalRawMutex, Mock<'_>>,
+    _device1: &Mutex<GlobalRawMutex, Mock<'_, DynamicSender<'_, EventData>>>,
     _device1_signal: &Signal<GlobalRawMutex, (usize, FnCall)>,
 ) {
     info!("Running test_single");
@@ -57,9 +57,9 @@ async fn test_single(
 
 /// Test swapping to a higher powered device.
 async fn test_swap_higher(
-    device0: &Mutex<GlobalRawMutex, Mock<'_>>,
+    device0: &Mutex<GlobalRawMutex, Mock<'_, DynamicSender<'_, EventData>>>,
     device0_signal: &Signal<GlobalRawMutex, (usize, FnCall)>,
-    device1: &Mutex<GlobalRawMutex, Mock<'_>>,
+    device1: &Mutex<GlobalRawMutex, Mock<'_, DynamicSender<'_, EventData>>>,
     device1_signal: &Signal<GlobalRawMutex, (usize, FnCall)>,
 ) {
     info!("Running test_swap_higher");

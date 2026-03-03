@@ -3,8 +3,12 @@ use embassy_futures::{
     join::join,
     select::{Either, select},
 };
-use embassy_sync::once_lock::OnceLock;
-use embassy_sync::{channel::Channel, mutex::Mutex, signal::Signal};
+use embassy_sync::{
+    channel::{Channel, DynamicReceiver, DynamicSender},
+    mutex::Mutex,
+    once_lock::OnceLock,
+    signal::Signal,
+};
 use embassy_time::{Duration, with_timeout};
 use embedded_services::GlobalRawMutex;
 use power_policy_interface::capability::PowerCapability;
@@ -33,13 +37,13 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 
 const EVENT_CHANNEL_SIZE: usize = 4;
 
-pub type DeviceType<'a> = Mutex<GlobalRawMutex, Mock<'a>>;
+pub type DeviceType<'a> = Mutex<GlobalRawMutex, Mock<'a, DynamicSender<'a, EventData>>>;
 pub type ServiceType<'a> = Service<'a, DeviceType<'a>>;
 
 async fn power_policy_task<'a, const N: usize>(
-    completion_signal: &Signal<GlobalRawMutex, ()>,
+    completion_signal: &'a Signal<GlobalRawMutex, ()>,
     mut power_policy: ServiceType<'a>,
-    mut event_receivers: EventReceivers<'a, N, DeviceType<'a>>,
+    mut event_receivers: EventReceivers<'a, N, DeviceType<'a>, DynamicReceiver<'a, EventData>>,
 ) {
     while let Either::First(result) = select(event_receivers.wait_event(), completion_signal.wait()).await {
         power_policy.process_psu_event(result).await.unwrap();
@@ -51,9 +55,9 @@ async fn power_policy_task<'a, const N: usize>(
 /// The trait we want to express for `run_test` is something like:
 /// ```
 /// for<'a> F: FnOnce(
-/// &'a Mutex<GlobalRawMutex, Mock<'a>>,
+/// &'a Mutex<GlobalRawMutex, Mock<'a, DynamicSender<'a, EventData>>>,
 /// &'a Signal<GlobalRawMutex, (usize, FnCall)>,
-/// &'a Mutex<GlobalRawMutex, Mock<'a>>,
+/// &'a Mutex<GlobalRawMutex, Mock<'a, DynamicSender<'a, EventData>>>,
 /// &'a Signal<GlobalRawMutex, (usize, FnCall)>
 /// ) -> impl (Future<Output = ()> + 'a)
 /// ```
@@ -77,9 +81,9 @@ pub async fn run_test<F>(timeout: Duration, test: F)
 where
     for<'a> F: TestArgsFnOnce<
             'a,
-            &'a Mutex<GlobalRawMutex, Mock<'a>>,
+            &'a Mutex<GlobalRawMutex, Mock<'a, DynamicSender<'a, EventData>>>,
             &'a Signal<GlobalRawMutex, (usize, FnCall)>,
-            &'a Mutex<GlobalRawMutex, Mock<'a>>,
+            &'a Mutex<GlobalRawMutex, Mock<'a, DynamicSender<'a, EventData>>>,
             &'a Signal<GlobalRawMutex, (usize, FnCall)>,
         >,
 {
