@@ -251,13 +251,22 @@ where
             if let Ok(connected_consumer) = power.try_device_action::<action::ConnectedConsumer>().await {
                 info!("Port{}: Disabling sink path due to PD hard reset", global_port_id.0);
                 // Vbus drops to 0V during a hard reset, stop drawing power
-                controller.enable_sink_path(local_port_id, false).await?;
+                match controller.enable_sink_path(local_port_id, false).await {
+                    Err(Error::Pd(err)) => error!(
+                        "Port{}: Error disabling sink path after PD hard reset, {:#?}",
+                        global_port_id.0, err
+                    ),
+                    Err(Error::Bus(_)) => error!(
+                        "Port{}: Error disabling sink path after PD hard reset, Bus error",
+                        global_port_id.0
+                    ),
+                    _ => {}
+                }
                 if let Err(e) = connected_consumer.disconnect().await {
                     error!(
                         "Port{}: Error disconnecting from ConnectedConsumer after PD hard reset: {:#?}",
                         global_port_id.0, e
                     );
-                    return PdError::Failed.into();
                 }
             } else if let Ok(connected_provider) = power.try_device_action::<action::ConnectedProvider>().await {
                 info!("Port{}: Disconnecting provider after hard reset", global_port_id.0);
@@ -266,7 +275,6 @@ where
                         "Port{}: Error disconnecting from ConnectedProvider after PD hard reset: {:#?}",
                         global_port_id.0, e
                     );
-                    return PdError::Failed.into();
                 }
             }
         }
