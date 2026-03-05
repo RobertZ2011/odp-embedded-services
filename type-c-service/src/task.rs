@@ -32,6 +32,7 @@ pub async fn task_closure<
     info!("Starting type-c task");
 
     // TODO: move this service to use the new power policy event subscribers and receivers
+    // See https://github.com/OpenDevicePartnership/embedded-services/issues/742
 
     for controller_wrapper in wrappers {
         if controller_wrapper.register(service.controllers(), cfu_client).is_err() {

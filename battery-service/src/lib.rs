@@ -128,6 +128,7 @@ impl comms::MailboxDelegate for Service {
             })?
         }
         // TODO: Migrate away from using comms for power policy updates
+        // See https://github.com/OpenDevicePartnership/embedded-services/issues/742
         /*else if let Some(power_policy_msg) = message
             .data
             .get::<power_policy_interface::service::event::CommsMessage>()

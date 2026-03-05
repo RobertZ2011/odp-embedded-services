@@ -186,29 +186,42 @@ impl State {
         result
     }
 
+    /// Check if a request to connect as a consumer from the policy is valid given the current state
+    /// Returns () or the error with information about why the request is invalid
+    pub fn can_connect_consumer(&self) -> Result<(), Error> {
+        match self.psu_state {
+            PsuState::Idle | PsuState::ConnectedConsumer(_) => Ok(()),
+            _ => Err(Error::InvalidState(
+                &[StateKind::Idle, StateKind::ConnectedConsumer],
+                self.psu_state.kind(),
+            )),
+        }
+    }
+
     /// Handle a request to connect as a consumer from the policy
     pub fn connect_consumer(&mut self, capability: ConsumerPowerCapability) -> Result<(), Error> {
-        let result = if self.psu_state == PsuState::Idle {
-            Ok(())
-        } else {
-            Err(Error::InvalidState(&[StateKind::Idle], self.psu_state.kind()))
-        };
+        self.can_connect_consumer()?;
         self.psu_state = PsuState::ConnectedConsumer(capability);
-        result
+        Ok(())
+    }
+
+    /// Check if a request to connect as a provider from the policy is valid given the current state
+    /// Returns () or the error with information about why the request is invalid
+    pub fn can_connect_provider(&self) -> Result<(), Error> {
+        match self.psu_state {
+            PsuState::Idle | PsuState::ConnectedProvider(_) => Ok(()),
+            _ => Err(Error::InvalidState(
+                &[StateKind::Idle, StateKind::ConnectedProvider],
+                self.psu_state.kind(),
+            )),
+        }
     }
 
     /// Handle a request to connect as a provider from the policy
     pub fn connect_provider(&mut self, capability: ProviderPowerCapability) -> Result<(), Error> {
-        let result = if matches!(self.psu_state, PsuState::Idle | PsuState::ConnectedProvider(_)) {
-            Ok(())
-        } else {
-            Err(Error::InvalidState(
-                &[StateKind::Idle, StateKind::ConnectedProvider],
-                self.psu_state.kind(),
-            ))
-        };
+        self.can_connect_provider()?;
         self.psu_state = PsuState::ConnectedProvider(capability);
-        result
+        Ok(())
     }
 
     /// Returns the current provider capability if the PSU is connected as a provider

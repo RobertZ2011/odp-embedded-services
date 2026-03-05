@@ -177,13 +177,12 @@ where
             return controller::Response::Port(Err(PdError::InvalidPort));
         };
 
-        let (psu_state, mut port_state) = if let Some(port) = self.ports.get(local_port.0 as usize) {
-            (port.proxy.lock().await.psu_state, port.state.lock().await)
-        } else {
+        let Some(port) = self.ports.get(local_port.0 as usize) else {
             debug!("Invalid port: {:?}", command.port);
             return controller::Response::Port(Err(PdError::InvalidPort));
         };
 
+        let mut port_state = port.state.lock().await;
         controller::Response::Port(match command.data {
             controller::PortCommandData::PortStatus(cached) => {
                 self.process_get_port_status(controller, &mut port_state, local_port, cached)
@@ -243,6 +242,7 @@ where
             controller::PortCommandData::SetMaxSinkVoltage(voltage_mv) => {
                 match self.registration.pd_controller.lookup_local_port(command.port) {
                     Ok(local_port) => {
+                        let psu_state = port.proxy.lock().await.psu_state;
                         self.process_set_max_sink_voltage(
                             controller,
                             &mut port_state,

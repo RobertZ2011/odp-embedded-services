@@ -6,7 +6,6 @@
 use core::ptr;
 
 use embedded_services::debug;
-use embedded_services::error;
 
 use super::*;
 
@@ -89,7 +88,7 @@ where
         };
 
         let mut locked_requester = requester.lock().await;
-        if let e @ Err(_) = locked_requester.state_mut().connect_provider(target_power) {
+        if let e @ Err(_) = locked_requester.state().can_connect_provider() {
             error!(
                 "({}): Cannot provide, device is in state {:#?}",
                 locked_requester.name(),
@@ -98,6 +97,7 @@ where
             e
         } else {
             locked_requester.connect_provider(target_power).await?;
+            locked_requester.state_mut().connect_provider(target_power)?;
             self.post_provider_connected(requester, target_power).await;
             Ok(())
         }
@@ -105,7 +105,7 @@ where
 
     /// Common logic for after a provider has successfully connected
     async fn post_provider_connected(&mut self, requester: &'a PSU, target_power: ProviderPowerCapability) {
-        let _ = self.state.connected_providers.insert(requester as *const PSU);
+        let _ = self.state.connected_providers.insert(requester as *const PSU as usize);
         self.broadcast_event(ServiceEvent::ProviderConnected(requester, target_power))
             .await;
     }

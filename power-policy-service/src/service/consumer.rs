@@ -231,7 +231,7 @@ where
         let mut psu = new_consumer.psu.lock().await;
         info!("({}): Connecting new consumer", psu.name());
 
-        if let e @ Err(_) = psu.state_mut().connect_consumer(new_consumer.consumer_power_capability) {
+        if let e @ Err(_) = psu.state().can_connect_consumer() {
             error!(
                 "({}): Not ready to connect consumer, state: {:#?}",
                 psu.name(),
@@ -240,6 +240,8 @@ where
             e
         } else {
             psu.connect_consumer(new_consumer.consumer_power_capability).await?;
+            psu.state_mut()
+                .connect_consumer(new_consumer.consumer_power_capability)?;
             self.post_consumer_connected(new_consumer).await
         }
     }

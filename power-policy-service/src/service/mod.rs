@@ -32,7 +32,7 @@ where
     /// System unconstrained power
     unconstrained: UnconstrainedState,
     /// Connected providers
-    connected_providers: heapless::FnvIndexSet<*const D, MAX_CONNECTED_PROVIDERS>,
+    connected_providers: heapless::FnvIndexSet<usize, MAX_CONNECTED_PROVIDERS>,
 }
 
 impl<D: Lockable> Default for InternalState<'_, D>
@@ -193,14 +193,15 @@ where
 
     /// Send an event to all registered listeners
     async fn broadcast_event(&mut self, _message: ServiceEvent<'a, PSU>) {
-        // TODO
+        // TODO: Add this back as part of the migration away from comms
+        // See https://github.com/OpenDevicePartnership/embedded-services/issues/742
     }
 
     /// Common logic for when a provider is disconnected
     ///
     /// Returns true if the device was operating as a provider
     async fn remove_connected_provider(&mut self, psu: &'a PSU) -> bool {
-        if self.state.connected_providers.remove(&(psu as *const PSU)) {
+        if self.state.connected_providers.remove(&(psu as *const PSU as usize)) {
             self.broadcast_event(ServiceEvent::ProviderDisconnected(psu)).await;
             true
         } else {

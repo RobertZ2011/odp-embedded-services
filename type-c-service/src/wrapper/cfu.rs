@@ -148,11 +148,13 @@ where
             // Detach from the power policy so it doesn't attempt to do anything while we are updating
             let controller_id = self.registration.pd_controller.id();
             for port in self.ports {
-                let (mut port_state, port_proxy) = (port.state.lock().await, port.proxy.lock().await);
+                let psu_state = port.proxy.lock().await.psu_state.psu_state;
                 info!("Controller{}: checking power device", controller_id.0);
-                if port_proxy.psu_state.psu_state != power_policy_interface::psu::PsuState::Detached {
+                if psu_state != power_policy_interface::psu::PsuState::Detached {
                     info!("Controller{}: Detaching power device", controller_id.0);
-                    port_state
+                    port.state
+                        .lock()
+                        .await
                         .power_policy_sender
                         .send(power_policy_interface::psu::event::EventData::Detached)
                         .await;

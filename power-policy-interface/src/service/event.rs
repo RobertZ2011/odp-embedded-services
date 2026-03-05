@@ -6,7 +6,7 @@ use crate::{
     service::UnconstrainedState,
 };
 
-/// Data to send with the comms service
+/// Events broadcast from the service.
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Event<'device, D: Lockable>

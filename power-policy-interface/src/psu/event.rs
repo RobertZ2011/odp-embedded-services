@@ -6,7 +6,7 @@ use crate::{
     psu,
 };
 
-/// Data for a power policy request
+/// Data for an event broadcast from a PSU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum EventData {
@@ -22,7 +22,7 @@ pub enum EventData {
     Detached,
 }
 
-/// Request to the power policy service
+/// Event broadcast from a PSU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Event<'a, D: Lockable>

@@ -517,6 +517,7 @@ impl Context {
     }
 
     // TODO: bring this back after moving away from comms for power policy
+    // See https://github.com/OpenDevicePartnership/embedded-services/issues/742
     /*pub(crate) fn set_power_info(
         &self,
         power_info: &power_policy_interface::service::event::CommsData,
