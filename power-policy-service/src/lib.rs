@@ -107,9 +107,7 @@ impl PowerPolicy {
     ///
     /// Returns true if the device was operating as a provider
     async fn remove_connected_provider(&self, device_id: DeviceId) -> bool {
-        let mut state = self.state.lock().await;
-
-        if state.connected_providers.remove(&device_id) {
+        if self.state.lock().await.connected_providers.remove(&device_id) {
             // Determine total requested power draw
             let mut total_power_mw = 0;
             for device in self.context.devices().iter_only::<device::Device>() {
@@ -119,11 +117,12 @@ impl PowerPolicy {
                     .map_or(0, |cap| cap.capability.max_power_mw());
             }
 
-            if total_power_mw > self.config.limited_power_threshold_mw {
-                state.current_provider_state.state = PowerState::Limited;
-            } else {
-                state.current_provider_state.state = PowerState::Unlimited;
-            }
+            self.state.lock().await.current_provider_state.state =
+                if total_power_mw > self.config.limited_power_threshold_mw {
+                    PowerState::Limited
+                } else {
+                    PowerState::Unlimited
+                };
 
             self.comms_notify(CommsMessage {
                 data: CommsData::ProviderDisconnected(device_id),
