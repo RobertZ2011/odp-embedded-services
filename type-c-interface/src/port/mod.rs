@@ -1,7 +1,7 @@
 //! PD controller related code
 use core::future::Future;
 
-use embedded_usb_pd::ucsi::{self, lpm};
+use embedded_usb_pd::ucsi::{GlobalResponse as UcsiGlobalResponse, lpm};
 use embedded_usb_pd::{
     DataRole, Error, GlobalPortId, LocalPortId, PdError, PlugOrientation, PowerRole,
     ado::Ado,
@@ -12,7 +12,14 @@ use embedded_usb_pd::{
 use embedded_services::ipc::deferred;
 use embedded_services::{GlobalRawMutex, intrusive_list};
 
+pub mod displayport;
 pub mod event;
+pub mod pd;
+pub mod retimer;
+pub mod state_machine;
+pub mod thunderbolt;
+pub mod ucsi;
+pub mod usb;
 
 use event::{PortEvent, PortPending};
 
@@ -422,7 +429,7 @@ pub enum Response<'a> {
     /// Controller response
     Controller(InternalResponse<'a>),
     /// UCSI response passthrough
-    Ucsi(ucsi::GlobalResponse),
+    Ucsi(UcsiGlobalResponse),
     /// Port response
     Port(PortResponse),
 }

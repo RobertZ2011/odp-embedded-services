@@ -14,6 +14,7 @@ pub mod thread_mode_cell;
 pub mod activity;
 pub mod broadcaster;
 pub mod buffer;
+pub mod bus_error;
 pub mod comms;
 pub mod event;
 pub mod fmt;
