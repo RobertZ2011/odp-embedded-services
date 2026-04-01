@@ -15,6 +15,7 @@ use type_c_interface::service::event;
 pub mod config;
 pub mod pd;
 mod power;
+pub mod registration;
 mod ucsi;
 pub mod vdm;
 
