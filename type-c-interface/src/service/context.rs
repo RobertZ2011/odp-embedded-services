@@ -82,7 +82,7 @@ impl Context {
         &self,
         controller_id: ControllerId,
         command: InternalCommandData,
-    ) -> Result<InternalResponseData<'static>, PdError> {
+    ) -> Result<InternalResponseData, PdError> {
         let node = self
             .controllers
             .into_iter()
@@ -114,7 +114,7 @@ impl Context {
         &self,
         controller_id: ControllerId,
         command: InternalCommandData,
-    ) -> Result<InternalResponseData<'static>, PdError> {
+    ) -> Result<InternalResponseData, PdError> {
         match with_timeout(
             DEFAULT_TIMEOUT,
             self.send_controller_command_no_timeout(controller_id, command),
@@ -343,10 +343,7 @@ impl Context {
     }
 
     /// Get current controller status
-    pub async fn get_controller_status(
-        &self,
-        controller_id: ControllerId,
-    ) -> Result<ControllerStatus<'static>, PdError> {
+    pub async fn get_controller_status(&self, controller_id: ControllerId) -> Result<ControllerStatus, PdError> {
         match self
             .send_controller_command(controller_id, InternalCommandData::Status)
             .await?

@@ -11,6 +11,7 @@ use power_policy_interface::psu::{CommandData, InternalResponseData, ResponseDat
 
 use crate::wrapper::backing::ControllerState;
 use crate::wrapper::config::UnconstrainedSink;
+use crate::wrapper::proxy::PortProxyCommandData;
 
 use super::*;
 
@@ -97,13 +98,13 @@ where
         Ok(())
     }
 
-    /// Wait for a power command
+    /// Wait for a port command
     ///
     /// Returns (local port ID, deferred request)
     /// DROP SAFETY: Call to a select over drop safe futures
-    pub(super) async fn wait_power_command(&self) -> (LocalPortId, CommandData) {
+    pub(super) async fn wait_port_command(&self) -> (LocalPortId, PortProxyCommandData) {
         let mut futures = heapless::Vec::<_, MAX_SUPPORTED_PORTS>::new();
-        for receiver in self.power_proxy_receivers {
+        for receiver in self.port_proxy_receivers {
             // TODO: check this at compile time
             if futures
                 .push(async {

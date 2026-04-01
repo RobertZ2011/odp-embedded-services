@@ -1,10 +1,9 @@
 //! [`crate::wrapper::ControllerWrapper`] message types
-use embedded_services::{GlobalRawMutex, ipc::deferred};
-use embedded_usb_pd::{LocalPortId, ado::Ado};
+use embedded_usb_pd::{LocalPortId, PdError, ado::Ado};
 
-use type_c_interface::{
-    port::event::{PortNotificationSingle, PortStatusChanged},
-    port::{self, DpStatus, PortStatus},
+use type_c_interface::port::{
+    DpStatus, PortResponseData, PortStatus,
+    event::{PortNotificationSingle, PortStatusChanged},
 };
 
 /// Port status changed event data
@@ -35,6 +34,14 @@ pub struct EventPowerPolicyCommand {
     pub request: power_policy_interface::psu::CommandData,
 }
 
+/// Port command event data
+pub struct EventPortCommand {
+    /// Port ID
+    pub port: LocalPortId,
+    /// Deferred request
+    pub request: type_c_interface::port::PortCommandData,
+}
+
 /// CFU events
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -48,7 +55,7 @@ pub enum EventCfu {
 }
 
 /// Wrapper events
-pub enum Event<'a> {
+pub enum Event {
     /// Port status changed
     PortStatusChanged(EventPortStatusChanged),
     /// Port notification
@@ -56,7 +63,7 @@ pub enum Event<'a> {
     /// Power policy command received
     PowerPolicyCommand(EventPowerPolicyCommand),
     /// Command from TCPM
-    ControllerCommand(deferred::Request<'a, GlobalRawMutex, port::Command, port::Response<'static>>),
+    PortCommand(EventPortCommand),
     /// Cfu event
     CfuEvent(EventCfu),
 }
@@ -92,11 +99,11 @@ pub struct OutputPowerPolicyCommand {
 }
 
 /// Controller command output data
-pub struct OutputControllerCommand<'a> {
-    /// Controller request
-    pub request: deferred::Request<'a, GlobalRawMutex, port::Command, port::Response<'static>>,
+pub struct OutputControllerCommand {
+    /// Port ID
+    pub port: LocalPortId,
     /// Response
-    pub response: port::Response<'static>,
+    pub response: Result<PortResponseData, PdError>,
 }
 
 pub mod vdm {
@@ -141,7 +148,7 @@ pub struct OutputDpStatusChanged {
 }
 
 /// [`crate::wrapper::ControllerWrapper`] output
-pub enum Output<'a> {
+pub enum Output {
     /// No-op when nothing specific is needed
     Nop,
     /// Port status changed
@@ -153,7 +160,7 @@ pub enum Output<'a> {
     /// Power policy command received
     PowerPolicyCommand(OutputPowerPolicyCommand),
     /// TPCM command response
-    ControllerCommand(OutputControllerCommand<'a>),
+    ControllerCommand(OutputControllerCommand),
     /// CFU recovery tick
     CfuRecovery,
     /// CFU response

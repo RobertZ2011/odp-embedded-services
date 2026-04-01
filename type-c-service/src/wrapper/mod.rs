@@ -21,7 +21,7 @@ use core::ops::DerefMut;
 
 use crate::wrapper::backing::{ControllerState, PortState};
 use cfu_service::CfuClient;
-use embassy_futures::select::{Either, Either5, select, select_array, select5};
+use embassy_futures::select::{Either, Either4, select, select_array, select4};
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
@@ -34,7 +34,7 @@ use embedded_usb_pd::ado::Ado;
 use embedded_usb_pd::{Error, LocalPortId, PdError};
 
 use crate::wrapper::message::*;
-use crate::wrapper::proxy::PowerProxyReceiver;
+use crate::wrapper::proxy::{PortProxyCommandData, PortProxyResponseData, PowerProxyReceiver};
 use crate::{PortEventStreamer, PortEventVariant};
 
 pub mod backing;
@@ -88,8 +88,8 @@ pub struct ControllerWrapper<
     sw_status_event: Signal<M, ()>,
     /// General config
     config: config::Config,
-    /// Power proxy receivers
-    power_proxy_receivers: &'device [Mutex<M, PowerProxyReceiver<'device>>],
+    /// Port proxy receivers
+    port_proxy_receivers: &'device [Mutex<M, PowerProxyReceiver<'device>>],
     /// Port proxies
     pub ports: &'device [backing::Port<'device, M, S>],
     /// Controller state
@@ -127,7 +127,7 @@ where
             ))),
             registration: backing.registration,
             sw_status_event: Signal::new(),
-            power_proxy_receivers: backing.power_receivers,
+            port_proxy_receivers: backing.power_receivers,
             ports: backing.ports,
             controller_state: Mutex::new(backing::ControllerState::default()),
         }
@@ -213,7 +213,7 @@ where
         controller: &mut D::Inner,
         local_port_id: LocalPortId,
         status_event: PortStatusChanged,
-    ) -> Result<Output<'b>, Error<<D::Inner as Controller>::BusError>> {
+    ) -> Result<Output, Error<<D::Inner as Controller>::BusError>> {
         let global_port_id = self
             .registration
             .pd_controller
@@ -374,24 +374,23 @@ where
     }
 
     /// Wait for the next event
-    pub async fn wait_next(&self) -> Result<Event<'_>, Error<<D::Inner as Controller>::BusError>> {
+    pub async fn wait_next(&self) -> Result<Event, Error<<D::Inner as Controller>::BusError>> {
         // This loop is to ensure that if we finish streaming events we go back to waiting for the next port event
         loop {
             let event = {
                 let controller_state = self.controller_state.lock().await;
                 let mut controller = self.controller.lock().await;
                 // DROP SAFETY: Select over drop safe functions
-                select5(
+                select4(
                     self.wait_port_pending(&controller_state, &mut controller),
-                    self.wait_power_command(),
-                    self.registration.pd_controller.receive(),
+                    self.wait_port_command(),
                     self.wait_cfu_command(),
                     self.wait_sink_ready_timeout(),
                 )
                 .await
             };
             match event {
-                Either5::First(stream) => {
+                Either4::First(stream) => {
                     let mut stream = stream?;
                     if let Some((port_index, event)) = stream
                         .next::<Error<<D::Inner as Controller>::BusError>, _, _>(async |port_index| {
@@ -435,12 +434,16 @@ where
                         self.controller_state.lock().await.port_event_streaming_state = None;
                     }
                 }
-                Either5::Second((port, request)) => {
-                    return Ok(Event::PowerPolicyCommand(EventPowerPolicyCommand { port, request }));
-                }
-                Either5::Third(request) => return Ok(Event::ControllerCommand(request)),
-                Either5::Fourth(event) => return Ok(Event::CfuEvent(event)),
-                Either5::Fifth(port) => {
+                Either4::Second((port, request)) => match request {
+                    PortProxyCommandData::Power(request) => {
+                        return Ok(Event::PowerPolicyCommand(EventPowerPolicyCommand { port, request }));
+                    }
+                    PortProxyCommandData::Port(request) => {
+                        return Ok(Event::PortCommand(EventPortCommand { port, request }));
+                    }
+                },
+                Either4::Third(event) => return Ok(Event::CfuEvent(event)),
+                Either4::Fourth(port) => {
                     // Sink ready timeout event
                     debug!("Port{0}: Sink ready timeout", port.0);
                     self.ports
@@ -459,12 +462,12 @@ where
     }
 
     /// Process a port notification
-    async fn process_port_notification<'b>(
+    async fn process_port_notification(
         &self,
         controller: &mut D::Inner,
         port: LocalPortId,
         notification: PortNotificationSingle,
-    ) -> Result<Output<'b>, Error<<D::Inner as Controller>::BusError>> {
+    ) -> Result<Output, Error<<D::Inner as Controller>::BusError>> {
         match notification {
             PortNotificationSingle::Alert => {
                 let ado = controller.get_pd_alert(port).await?;
@@ -493,10 +496,7 @@ where
 
     /// Top-level processing function
     /// Only call this fn from one place in a loop. Otherwise a deadlock could occur.
-    pub async fn process_event<'b>(
-        &self,
-        event: Event<'b>,
-    ) -> Result<Output<'b>, Error<<D::Inner as Controller>::BusError>> {
+    pub async fn process_event(&self, event: Event) -> Result<Output, Error<<D::Inner as Controller>::BusError>> {
         let mut controller = self.controller.lock().await;
         let mut controller_state = self.controller_state.lock().await;
         match event {
@@ -510,11 +510,14 @@ where
                     .await;
                 Ok(Output::PowerPolicyCommand(OutputPowerPolicyCommand { port, response }))
             }
-            Event::ControllerCommand(request) => {
+            Event::PortCommand(request) => {
                 let response = self
-                    .process_pd_command(&mut controller_state, &mut controller, &request.command)
+                    .process_port_command(&mut controller_state, &mut controller, &request)
                     .await;
-                Ok(Output::ControllerCommand(OutputControllerCommand { request, response }))
+                Ok(Output::ControllerCommand(OutputControllerCommand {
+                    port: request.port,
+                    response,
+                }))
             }
             Event::CfuEvent(event) => match event {
                 EventCfu::Request(request) => {
@@ -537,7 +540,7 @@ where
     }
 
     /// Event loop finalize
-    pub async fn finalize<'b>(&self, output: Output<'b>) -> Result<(), Error<<D::Inner as Controller>::BusError>> {
+    pub async fn finalize(&self, output: Output) -> Result<(), Error<<D::Inner as Controller>::BusError>> {
         match output {
             Output::Nop => Ok(()),
             Output::PortStatusChanged(OutputPortStatusChanged {
@@ -548,17 +551,23 @@ where
             Output::PdAlert(OutputPdAlert { port, ado }) => self.finalize_pd_alert(port, ado).await,
             Output::Vdm(vdm) => self.finalize_vdm(vdm).await.map_err(Error::Pd),
             Output::PowerPolicyCommand(OutputPowerPolicyCommand { port, response }) => {
-                self.power_proxy_receivers
+                self.port_proxy_receivers
                     .get(port.0 as usize)
                     .ok_or(Error::Pd(PdError::InvalidPort))?
                     .lock()
                     .await
-                    .send(response)
+                    .send(PortProxyResponseData::Power(response))
                     .await;
                 Ok(())
             }
-            Output::ControllerCommand(OutputControllerCommand { request, response }) => {
-                request.respond(response);
+            Output::ControllerCommand(OutputControllerCommand { port, response }) => {
+                self.port_proxy_receivers
+                    .get(port.0 as usize)
+                    .ok_or(Error::Pd(PdError::InvalidPort))?
+                    .lock()
+                    .await
+                    .send(PortProxyResponseData::Port(response))
+                    .await;
                 Ok(())
             }
             Output::CfuRecovery => {
@@ -577,9 +586,9 @@ where
     }
 
     /// Combined processing and finialization function
-    pub async fn process_and_finalize_event<'b>(
+    pub async fn process_and_finalize_event(
         &self,
-        event: Event<'b>,
+        event: Event,
     ) -> Result<(), Error<<D::Inner as Controller>::BusError>> {
         let output = self.process_event(event).await?;
         self.finalize(output).await

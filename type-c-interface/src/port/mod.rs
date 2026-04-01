@@ -412,22 +412,22 @@ pub enum Command {
 /// Controller-specific response data
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum InternalResponseData<'a> {
+pub enum InternalResponseData {
     /// Command complete
     Complete,
     /// Controller status
-    Status(ControllerStatus<'a>),
+    Status(ControllerStatus),
 }
 
 /// Response for controller-specific commands
-pub type InternalResponse<'a> = Result<InternalResponseData<'a>, PdError>;
+pub type InternalResponse = Result<InternalResponseData, PdError>;
 
 /// PD controller command response
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum Response<'a> {
+pub enum Response {
     /// Controller response
-    Controller(InternalResponse<'a>),
+    Controller(InternalResponse),
     /// UCSI response passthrough
     Ucsi(UcsiGlobalResponse),
     /// Port response
@@ -437,9 +437,9 @@ pub enum Response<'a> {
 /// Controller status
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct ControllerStatus<'a> {
+pub struct ControllerStatus {
     /// Current controller mode
-    pub mode: &'a str,
+    pub mode: &'static str,
     /// True if we did not have to boot from a backup FW bank
     pub valid_fw_bank: bool,
     /// FW version 0
@@ -454,7 +454,7 @@ pub struct Device<'a> {
     id: ControllerId,
     ports: &'a [GlobalPortId],
     num_ports: usize,
-    command: deferred::Channel<GlobalRawMutex, Command, Response<'static>>,
+    command: deferred::Channel<GlobalRawMutex, Command, Response>,
 }
 
 impl intrusive_list::NodeContainer for Device<'static> {
@@ -481,7 +481,7 @@ impl<'a> Device<'a> {
     }
 
     /// Send a command to this controller
-    pub async fn execute_command(&self, command: Command) -> Response<'_> {
+    pub async fn execute_command(&self, command: Command) -> Response {
         self.command.execute(command).await
     }
 
@@ -507,7 +507,7 @@ impl<'a> Device<'a> {
     /// Create a command handler for this controller
     ///
     /// DROP SAFETY: Direct call to deferred channel primitive
-    pub async fn receive(&self) -> deferred::Request<'_, GlobalRawMutex, Command, Response<'static>> {
+    pub async fn receive(&self) -> deferred::Request<'_, GlobalRawMutex, Command, Response> {
         self.command.receive().await
     }
 
@@ -581,9 +581,7 @@ pub trait Controller {
         enable: bool,
     ) -> impl Future<Output = Result<(), Error<Self::BusError>>>;
     /// Get current controller status
-    fn get_controller_status(
-        &mut self,
-    ) -> impl Future<Output = Result<ControllerStatus<'static>, Error<Self::BusError>>>;
+    fn get_controller_status(&mut self) -> impl Future<Output = Result<ControllerStatus, Error<Self::BusError>>>;
     /// Get current PD alert
     fn get_pd_alert(&mut self, port: LocalPortId) -> impl Future<Output = Result<Option<Ado>, Error<Self::BusError>>>;
     /// Set the maximum sink voltage for the given port

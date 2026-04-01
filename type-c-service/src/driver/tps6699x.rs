@@ -466,7 +466,7 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
         self.tps6699x.get_rx_ado(port).await.map_err(Error::from)
     }
 
-    async fn get_controller_status(&mut self) -> Result<ControllerStatus<'static>, Error<Self::BusError>> {
+    async fn get_controller_status(&mut self) -> Result<ControllerStatus, Error<Self::BusError>> {
         let boot_flags = self.tps6699x.get_boot_flags().await?;
         let customer_use = CustomerUse(self.tps6699x.get_customer_use().await?);
 
