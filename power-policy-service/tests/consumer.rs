@@ -92,7 +92,7 @@ impl Test for TestSingle {
 }
 
 /// Test swapping to a higher powered device.
-pub struct TestSwapHigher;
+struct TestSwapHigher;
 
 impl Test for TestSwapHigher {
     async fn run<'a>(
