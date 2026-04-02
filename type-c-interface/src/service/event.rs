@@ -1,6 +1,37 @@
 //! Comms service message definitions
 
-use embedded_usb_pd::GlobalPortId;
+use embedded_usb_pd::{GlobalPortId, ado::Ado};
+
+use crate::port::{
+    PortStatus,
+    event::{PortStatusEventBitfield, VdmData},
+};
+
+/// Enum to contain all port event variants
+#[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum PortEventData {
+    /// Port status change events
+    StatusChanged(PortStatusEventBitfield, PortStatus),
+    /// PD alert
+    Alert(Ado),
+    /// VDM
+    Vdm(VdmData),
+    /// Discover mode completed
+    DiscoverModeCompleted,
+    /// USB mux error recovery
+    UsbMuxErrorRecovery,
+    /// DP status update
+    DpStatusUpdate,
+}
+
+/// Enum to contain all port event variants
+#[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct PortEvent {
+    pub port: GlobalPortId,
+    pub event: PortEventData,
+}
 
 /// Message generated when a debug acessory is connected or disconnected
 #[derive(Copy, Clone, Debug)]
