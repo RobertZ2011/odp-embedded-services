@@ -33,7 +33,7 @@ pub struct PortEvent {
     pub event: PortEventData,
 }
 
-/// Message generated when a debug acessory is connected or disconnected
+/// Message generated when a debug accessory is connected or disconnected
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct DebugAccessory {

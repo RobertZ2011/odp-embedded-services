@@ -1,7 +1,7 @@
 //! This module provides TCPM event types and bitfields.
 //! Hardware typically uses bitfields to store pending events/interrupts so we provide generic versions of these.
 //! [`PortStatusEventBitfield`] contains events related to the overall port state (plug state, power contract, etc).
-//! Processing these events typically requires acessing similar registers so they are grouped together.
+//! Processing these events typically requires accessing similar registers so they are grouped together.
 //! [`PortNotificationEventBitfield`] contains events that are typically more message-like (PD alerts, VDMs, etc) and can be processed independently.
 //! Consequently [`PortNotificationEventBitfield`] implements iterator traits to allow for processing these events as a stream.
 use bitfield::bitfield;
