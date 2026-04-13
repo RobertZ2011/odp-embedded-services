@@ -25,7 +25,7 @@ pub enum PortEventData {
     DpStatusUpdate,
 }
 
-/// Enum to contain all port event variants
+/// Struct containing a complete port event
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct PortEvent {

@@ -115,7 +115,7 @@ mod tests {
     use super::*;
     use core::sync::atomic::AtomicBool;
 
-    /// Utitily function to create a PortStatusChanged event
+    /// Utility function to create a PortStatusChanged event
     fn status_changed(plug_event: bool, power_contract: bool, sink_ready: bool) -> PortStatusEventBitfield {
         let mut status_changed = PortStatusEventBitfield::none();
         status_changed.set_plug_inserted_or_removed(plug_event);
