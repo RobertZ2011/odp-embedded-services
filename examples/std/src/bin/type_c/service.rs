@@ -204,7 +204,7 @@ fn create_wrapper(
         0, // CFU component ID (unused)
         [PortRegistration {
             id: PORT0_ID,
-            sender: Mutex::new(PORT0_CHANNEL.dyn_sender()),
+            sender: PORT0_CHANNEL.dyn_sender(),
             receiver: PORT0_CHANNEL.dyn_receiver(),
         }],
     ));

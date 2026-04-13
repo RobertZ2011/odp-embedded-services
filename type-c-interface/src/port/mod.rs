@@ -2,7 +2,6 @@
 use core::future::Future;
 
 use embassy_sync::channel::{DynamicReceiver, DynamicSender};
-use embassy_sync::mutex::Mutex;
 use embedded_usb_pd::ucsi::{self, lpm};
 use embedded_usb_pd::{
     DataRole, Error, GlobalPortId, LocalPortId, PdError, PlugOrientation, PowerRole,
@@ -436,7 +435,7 @@ pub struct PortRegistration {
     /// Event receiver for the type-C service
     pub receiver: DynamicReceiver<'static, ServicePortEvent>,
     /// Event sender for the type-C service
-    pub sender: Mutex<GlobalRawMutex, DynamicSender<'static, ServicePortEvent>>,
+    pub sender: DynamicSender<'static, ServicePortEvent>,
 }
 
 /// PD controller

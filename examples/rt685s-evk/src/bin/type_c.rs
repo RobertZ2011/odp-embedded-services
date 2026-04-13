@@ -177,12 +177,12 @@ async fn main(spawner: Spawner) {
         [
             PortRegistration {
                 id: PORT0_ID,
-                sender: Mutex::new(PORT0_CHANNEL.dyn_sender()),
+                sender: PORT0_CHANNEL.dyn_sender(),
                 receiver: PORT0_CHANNEL.dyn_receiver(),
             },
             PortRegistration {
                 id: PORT1_ID,
-                sender: Mutex::new(PORT1_CHANNEL.dyn_sender()),
+                sender: PORT1_CHANNEL.dyn_sender(),
                 receiver: PORT1_CHANNEL.dyn_receiver(),
             },
         ],

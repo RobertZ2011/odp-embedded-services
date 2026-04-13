@@ -1,6 +1,5 @@
 use embassy_executor::{Executor, Spawner};
 use embassy_sync::channel::Channel;
-use embassy_sync::mutex::Mutex;
 use embassy_time::Timer;
 use embedded_services::GlobalRawMutex;
 use embedded_usb_pd::ucsi::lpm;
@@ -112,12 +111,12 @@ async fn controller_task(controller_context: &'static Context) {
     let ports = PORTS.init([
         PortRegistration {
             id: PORT0_ID,
-            sender: Mutex::new(PORT0_CHANNEL.dyn_sender()),
+            sender: PORT0_CHANNEL.dyn_sender(),
             receiver: PORT0_CHANNEL.dyn_receiver(),
         },
         PortRegistration {
             id: PORT1_ID,
-            sender: Mutex::new(PORT1_CHANNEL.dyn_sender()),
+            sender: PORT1_CHANNEL.dyn_sender(),
             receiver: PORT1_CHANNEL.dyn_receiver(),
         },
     ]);

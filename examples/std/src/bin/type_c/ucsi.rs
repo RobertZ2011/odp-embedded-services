@@ -239,7 +239,7 @@ async fn task(spawner: Spawner) {
         CFU0_ID,
         [PortRegistration {
             id: PORT0_ID,
-            sender: Mutex::new(PORT0_CHANNEL.dyn_sender()),
+            sender: PORT0_CHANNEL.dyn_sender(),
             receiver: PORT0_CHANNEL.dyn_receiver(),
         }],
     ));
@@ -300,7 +300,7 @@ async fn task(spawner: Spawner) {
         CFU1_ID,
         [PortRegistration {
             id: PORT1_ID,
-            sender: Mutex::new(PORT1_CHANNEL.dyn_sender()),
+            sender: PORT1_CHANNEL.dyn_sender(),
             receiver: PORT1_CHANNEL.dyn_receiver(),
         }],
     ));

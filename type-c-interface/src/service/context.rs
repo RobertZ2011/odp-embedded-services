@@ -480,8 +480,6 @@ impl Context {
             .find(|descriptor| descriptor.id == event.port)
             .ok_or(PdError::InvalidPort)?
             .sender
-            .lock()
-            .await
             .send(event)
             .await;
         Ok(())
