@@ -2,7 +2,7 @@
 use core::future::Future;
 
 use embassy_sync::channel::{DynamicReceiver, DynamicSender};
-use embedded_usb_pd::ucsi::{self, lpm};
+use embedded_usb_pd::ucsi::{GlobalResponse as UcsiGlobalResponse, lpm};
 use embedded_usb_pd::{
     DataRole, Error, GlobalPortId, LocalPortId, PdError, PlugOrientation, PowerRole,
     ado::Ado,
@@ -14,6 +14,8 @@ use embedded_services::ipc::deferred;
 use embedded_services::{GlobalRawMutex, intrusive_list};
 
 pub mod event;
+pub mod pd;
+pub mod ucsi;
 
 use crate::port::event::PortEventBitfield;
 use crate::service::event::PortEvent as ServicePortEvent;
@@ -409,7 +411,7 @@ pub enum Response<'a> {
     /// Controller response
     Controller(InternalResponse<'a>),
     /// UCSI response passthrough
-    Ucsi(ucsi::GlobalResponse),
+    Ucsi(UcsiGlobalResponse),
     /// Port response
     Port(PortResponse),
 }
