@@ -149,7 +149,7 @@ where
             } else {
                 // No longer need to source, so disconnect
                 if let Err(e) = state.disconnect().await {
-                    error!("Error setting power contract: {:?}", e);
+                    error!("Error disconnecting as provider: {:?}", e);
                     return PdError::Failed.into();
                 }
             }
