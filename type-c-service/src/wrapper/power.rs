@@ -69,12 +69,14 @@ where
                 return PdError::Failed.into();
             }
         } else if let Ok(state) = power.try_device_action::<action::ConnectedConsumer>().await {
+            // Staying a consumer, but we have updated capabilities
             if let Err(e) = state.notify_consumer_power_capability(available_sink_contract).await {
                 error!("Error setting power contract: {:?}", e);
                 return PdError::Failed.into();
             }
         } else if let Ok(state) = power.try_device_action::<action::ConnectedProvider>().await {
-            // We're no longer providing power, so disconnect as a provider
+            // Transition from provider to consumer.
+            // This handles role swaps from source to sink.
             let Ok(state) = state.disconnect().await else {
                 error!("Error disconnecting as provider");
                 return PdError::Failed.into();
@@ -142,6 +144,7 @@ where
             }
         } else if let Ok(state) = power.try_device_action::<action::ConnectedProvider>().await {
             if let Some(contract) = contract {
+                // Staying a provider, but we have updated capabilities
                 if let Err(e) = state.request_provider_power_capability(contract).await {
                     error!("Error setting power contract: {:?}", e);
                     return PdError::Failed.into();
@@ -154,12 +157,14 @@ where
                 }
             }
         } else if let Ok(state) = power.try_device_action::<action::ConnectedConsumer>().await {
-            // We're no longer consuming power, so disconnect as a consumer
+            // Transition from consumer to provider.
+            // This handles role swaps from sink to source.
             let Ok(state) = state.disconnect().await else {
                 error!("Error disconnecting as consumer");
                 return PdError::Failed.into();
             };
 
+            // If contract is none, we're no longer requesting power on this port
             if let Some(contract) = contract {
                 if let Err(e) = state.request_provider_power_capability(contract).await {
                     error!("Error setting power contract: {:?}", e);
