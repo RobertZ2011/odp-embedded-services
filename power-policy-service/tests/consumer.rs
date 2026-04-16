@@ -415,6 +415,10 @@ impl Test for TestDisconnectOtherConsumer {
                 .simulate_consumer_connection(LOW_POWER.into())
                 .await;
 
+            assert_eq!(
+                with_timeout(PER_CALL_TIMEOUT, device1_signal.wait()).await,
+                Err(TimeoutError)
+            );
             device1_signal.reset();
 
             // Ensure consumer change doesn't affect provider power computation
@@ -426,6 +430,10 @@ impl Test for TestDisconnectOtherConsumer {
             device1.lock().await.simulate_disconnect().await;
 
             // Power policy shouldn't call any functions on disconnect so we'll timeout
+            assert_eq!(
+                with_timeout(PER_CALL_TIMEOUT, device0_signal.wait()).await,
+                Err(TimeoutError)
+            );
             assert_eq!(
                 with_timeout(PER_CALL_TIMEOUT, device1_signal.wait()).await,
                 Err(TimeoutError)
@@ -519,6 +527,10 @@ impl Test for TestDisconnectOtherProvider {
             device1.lock().await.simulate_disconnect().await;
 
             // Power policy shouldn't call any functions on disconnect so we'll timeout
+            assert_eq!(
+                with_timeout(PER_CALL_TIMEOUT, device0_signal.wait()).await,
+                Err(TimeoutError)
+            );
             assert_eq!(
                 with_timeout(PER_CALL_TIMEOUT, device1_signal.wait()).await,
                 Err(TimeoutError)
