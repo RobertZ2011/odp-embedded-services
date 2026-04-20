@@ -11,6 +11,7 @@
 //!
 //! [`ControllerWrapper::finalize`] consumes [`message::Output`] and responds to any deferred requests, performs
 //! any caching/buffering of data, and notifies the type-C service implementation of the event if needed.
+use core::error;
 use core::ops::DerefMut;
 
 use crate::wrapper::backing::PortState;
@@ -23,6 +24,7 @@ use embedded_services::sync::Lockable;
 use embedded_services::{error, info, trace};
 use embedded_usb_pd::ado::Ado;
 use embedded_usb_pd::{Error, LocalPortId, PdError};
+use power_policy_interface::psu::PsuState;
 use type_c_interface::port::event::PortEvent as InterfacePortEvent;
 use type_c_interface::service::event::{PortEvent as ServicePortEvent, PortEventData as ServicePortEventData};
 
@@ -149,17 +151,30 @@ where
     async fn process_plug_event(
         &self,
         port_state: &mut PortState<S>,
+        psu_state: &mut power_policy_interface::psu::State,
         status: &PortStatus,
     ) -> Result<(), Error<<D::Inner as Controller>::BusError>> {
         info!("Plug event");
         if status.is_connected() {
             info!("Plug inserted");
+            if psu_state.psu_state != PsuState::Detached {
+                info!("Device not in detached state, recovering");
+                psu_state.detach();
+            }
+
+            if let Err(e) = psu_state.attach() {
+                // This should never happen because we should have detached above
+                error!("Failed to attach PSU: {:?}", e);
+                return Err(Error::Pd(PdError::Failed));
+            }
+
             port_state
                 .power_policy_sender
                 .send(power_policy_interface::psu::event::EventData::Attached)
                 .await;
         } else {
             info!("Plug removed");
+            psu_state.detach();
             port_state
                 .power_policy_sender
                 .send(power_policy_interface::psu::event::EventData::Detached)
@@ -183,29 +198,35 @@ where
             .lookup_global_port(local_port_id)
             .map_err(Error::Pd)?;
 
-        let mut port_state = self
+        let port = self
             .ports
             .get(local_port_id.0 as usize)
-            .ok_or(Error::Pd(PdError::InvalidPort))?
-            .state
-            .lock()
-            .await;
+            .ok_or(Error::Pd(PdError::InvalidPort))?;
+
+        let mut port_state = port.state.lock().await;
 
         let status = controller.get_port_status(local_port_id).await?;
         trace!("Port{} status: {:#?}", global_port_id.0, status);
         trace!("Port{} status events: {:#?}", global_port_id.0, status_event);
 
-        if status_event.plug_inserted_or_removed() {
-            self.process_plug_event(&mut port_state, &status).await?;
-        }
+        {
+            let mut proxy = port.proxy.lock().await;
 
-        // Only notify power policy of a contract after Sink Ready event (always after explicit or implicit contract)
-        if status_event.sink_ready() {
-            self.process_new_consumer_contract(&mut port_state, &status).await?;
-        }
+            if status_event.plug_inserted_or_removed() {
+                self.process_plug_event(&mut port_state, &mut proxy.psu_state, &status)
+                    .await?;
+            }
 
-        if status_event.new_power_contract_as_provider() {
-            self.process_new_provider_contract(&mut port_state, &status).await?;
+            // Only notify power policy of a contract after Sink Ready event (always after explicit or implicit contract)
+            if status_event.sink_ready() {
+                self.process_new_consumer_contract(&mut port_state, &mut proxy.psu_state, &status)
+                    .await?;
+            }
+
+            if status_event.new_power_contract_as_provider() {
+                self.process_new_provider_contract(&mut port_state, &mut proxy.psu_state, &status)
+                    .await?;
+            }
         }
 
         self.check_sink_ready_timeout(
