@@ -239,52 +239,6 @@ impl State {
     }
 }
 
-/// Data for a device request
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum CommandData {
-    /// Start consuming on this device
-    ConnectAsConsumer(ConsumerPowerCapability),
-    /// Start providing power to port partner on this device
-    ConnectAsProvider(ProviderPowerCapability),
-    /// Stop providing or consuming on this device
-    Disconnect,
-}
-
-/// Request from power policy service to a device
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct Command {
-    /// Request data
-    pub data: CommandData,
-}
-
-/// Data for a device response
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum ResponseData {
-    /// The request was successful
-    Complete,
-}
-
-impl ResponseData {
-    /// Returns an InvalidResponse error if the response is not complete
-    pub fn complete_or_err(self) -> Result<(), Error> {
-        match self {
-            ResponseData::Complete => Ok(()),
-        }
-    }
-}
-
-/// Wrapper type to make code cleaner
-pub type InternalResponseData = Result<ResponseData, Error>;
-
-/// Response from a device to the power policy service
-pub struct Response {
-    /// Response data
-    pub data: ResponseData,
-}
-
 /// Trait for PSU devices
 pub trait Psu: Named {
     /// Disconnect power from this device
