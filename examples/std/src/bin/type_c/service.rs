@@ -14,19 +14,23 @@ use power_policy_interface::psu;
 use power_policy_service::psu::PsuEventReceivers;
 use power_policy_service::service::registration::ArrayRegistration;
 use static_cell::StaticCell;
-use std_examples::type_c::mock_controller;
 use std_examples::type_c::mock_controller::Wrapper;
+use std_examples::type_c::mock_controller::{self, InterruptReceiver};
+use type_c_interface::port::event::PortEventBitfield;
 use type_c_interface::port::{ControllerId, PortRegistration};
 use type_c_interface::service::event::PortEvent as ServicePortEvent;
 use type_c_service::bridge::Bridge;
 use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
 use type_c_service::service::config::Config;
-use type_c_service::service::{EventReceiver, Service};
+use type_c_service::service::{EventReceiver as ServiceEventReceiver, Service};
 use type_c_service::util::power_capability_from_current;
 use type_c_service::wrapper::backing::Storage;
-use type_c_service::wrapper::event_receiver::ArrayPortEventReceivers;
 use type_c_service::wrapper::message::*;
 use type_c_service::wrapper::proxy::PowerProxyDevice;
+use type_c_service::wrapper::proxy::event::Event as PortEvent;
+use type_c_service::wrapper::proxy::event_receiver::InterruptReceiver as _;
+use type_c_service::wrapper::proxy::event_receiver::{EventReceiver as PortEventReceiver, PortEventSplitter};
+use type_c_service::wrapper::proxy::state::SharedState;
 
 const NUM_PD_CONTROLLERS: usize = 1;
 const CHANNEL_CAPACITY: usize = 4;
@@ -57,20 +61,30 @@ type PowerPolicyServiceType = Mutex<
 >;
 
 type ServiceType = Service<'static>;
+type SharedStateType = Mutex<GlobalRawMutex, SharedState>;
+type PortEventReceiverType = PortEventReceiver<'static, SharedStateType, DynamicReceiver<'static, PortEventBitfield>>;
 
 #[embassy_executor::task]
 async fn controller_task(
-    mut event_receiver: ArrayPortEventReceivers<1, mock_controller::InterruptReceiver<'static>>,
+    shared_state: &'static SharedStateType,
+    mut event_receiver: PortEventReceiverType,
     wrapper: &'static Wrapper<'static>,
     controller: &'static ControllerType,
 ) {
     controller.lock().await.custom_function();
 
     loop {
-        let event = event_receiver.wait_event().await;
+        let PortEvent::PortEvent(event) = event_receiver.wait_event().await;
 
+        let mut shared_state = shared_state.lock().await;
         let output = wrapper
-            .process_event(&mut event_receiver.sink_ready_timeout, event)
+            .process_event(
+                &mut shared_state,
+                type_c_service::wrapper::message::Event::PortEvent(type_c_service::wrapper::message::LocalPortEvent {
+                    port: LocalPortId(0),
+                    event,
+                }),
+            )
             .await;
         if let Err(e) = output {
             error!("Error processing event: {e:?}");
@@ -84,6 +98,17 @@ async fn controller_task(
         if let Err(e) = wrapper.finalize(output).await {
             error!("Error finalizing output: {e:?}");
         }
+    }
+}
+
+#[embassy_executor::task]
+async fn interrupt_splitter_task(
+    mut interrupt_receiver: InterruptReceiver<'static>,
+    mut interrupt_splitter: PortEventSplitter<1, DynamicSender<'static, PortEventBitfield>>,
+) -> ! {
+    loop {
+        let interrupts = interrupt_receiver.wait_interrupt().await;
+        interrupt_splitter.process_interrupts(interrupts).await;
     }
 }
 
@@ -161,8 +186,6 @@ async fn task(spawner: Spawner) {
             .expect("Failed to create referenced storage"),
     );
 
-    let event_receiver = ArrayPortEventReceivers::new(state.create_interrupt_receiver());
-
     static WRAPPER: StaticCell<mock_controller::Wrapper> = StaticCell::new();
     let wrapper = WRAPPER.init(mock_controller::Wrapper::new(
         controller,
@@ -172,6 +195,15 @@ async fn task(spawner: Spawner) {
 
     let bridge_receiver = BridgeEventReceiver::new(&referenced.pd_controller);
     let bridge = Bridge::new(controller, &referenced.pd_controller);
+
+    static PORT_SHARED_STATE: StaticCell<SharedStateType> = StaticCell::new();
+    let port_shared_state = PORT_SHARED_STATE.init(Mutex::new(SharedState::new()));
+
+    static PORT_INTERRUPT_CHANNEL: StaticCell<Channel<GlobalRawMutex, PortEventBitfield, CHANNEL_CAPACITY>> =
+        StaticCell::new();
+    let port_interrupt_channel = PORT_INTERRUPT_CHANNEL.init(Channel::new());
+    let port_interrupt_receiver = port_interrupt_channel.dyn_receiver();
+    let port_interrupt_sender = port_interrupt_channel.dyn_sender();
 
     // Create type-c service
     // The service is the only receiver and we only use a DynImmediatePublisher, which doesn't take a publisher slot
@@ -211,14 +243,30 @@ async fn task(spawner: Spawner) {
     spawner.spawn(
         type_c_service_task(
             type_c_service,
-            EventReceiver::new(controller_context, power_policy_subscriber),
+            ServiceEventReceiver::new(controller_context, power_policy_subscriber),
             [wrapper],
         )
         .expect("Failed to create type-c service task"),
     );
 
     spawner.spawn(bridge_task(bridge_receiver, bridge).expect("Failed to create bridge task"));
-    spawner.spawn(controller_task(event_receiver, wrapper, controller).expect("Failed to create controller task"));
+    spawner.spawn(
+        controller_task(
+            port_shared_state,
+            PortEventReceiver::new(port_shared_state, port_interrupt_receiver),
+            wrapper,
+            controller,
+        )
+        .expect("Failed to create controller task"),
+    );
+
+    spawner.spawn(
+        interrupt_splitter_task(
+            state.create_interrupt_receiver(),
+            PortEventSplitter::new([port_interrupt_sender]),
+        )
+        .expect("Failed to create interrupt splitter task"),
+    );
 
     Timer::after_millis(1000).await;
     info!("Simulating connection");
@@ -255,7 +303,7 @@ async fn power_policy_psu_task(
 #[embassy_executor::task]
 async fn type_c_service_task(
     service: &'static Mutex<GlobalRawMutex, ServiceType>,
-    event_receiver: EventReceiver<'static, PowerPolicyReceiverType>,
+    event_receiver: ServiceEventReceiver<'static, PowerPolicyReceiverType>,
     wrappers: [&'static Wrapper<'static>; NUM_PD_CONTROLLERS],
 ) {
     info!("Starting type-c task");

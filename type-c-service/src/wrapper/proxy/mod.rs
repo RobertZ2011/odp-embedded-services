@@ -2,7 +2,10 @@ use embedded_services::{named::Named, sync::Lockable};
 use embedded_usb_pd::LocalPortId;
 use type_c_interface::port::Controller;
 
+pub mod event;
+pub mod event_receiver;
 mod power;
+pub mod state;
 
 pub struct PowerProxyDevice<'device, C: Lockable<Inner: Controller>> {
     /// Local port

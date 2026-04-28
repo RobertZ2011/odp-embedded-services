@@ -119,7 +119,7 @@ pub struct InterruptReceiver<'a> {
     events: &'a Signal<GlobalRawMutex, PortEventBitfield>,
 }
 
-impl<const N: usize> type_c_service::wrapper::event_receiver::InterruptReceiver<N> for InterruptReceiver<'_> {
+impl<const N: usize> type_c_service::wrapper::proxy::event_receiver::InterruptReceiver<N> for InterruptReceiver<'_> {
     async fn wait_interrupt(&mut self) -> [PortEventBitfield; N] {
         let events = self.events.wait().await;
         let mut result = [PortEventBitfield::none(); N];

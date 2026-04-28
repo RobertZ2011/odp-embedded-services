@@ -14,7 +14,7 @@
 use core::ops::DerefMut;
 
 use crate::wrapper::backing::PortState;
-use crate::wrapper::event_receiver::SinkReadyTimeoutEvent;
+use crate::wrapper::proxy::state::SharedState;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Instant;
@@ -32,7 +32,6 @@ use crate::wrapper::message::*;
 pub mod backing;
 pub mod config;
 mod dp;
-pub mod event_receiver;
 pub mod message;
 mod pd;
 mod power;
@@ -184,9 +183,9 @@ where
     }
 
     /// Process port status changed events
-    async fn process_port_status_changed<const N: usize>(
+    async fn process_port_status_changed(
         &self,
-        sink_ready_timeout: &mut SinkReadyTimeoutEvent<N>,
+        shared_state: &mut SharedState,
         controller: &mut D::Inner,
         local_port_id: LocalPortId,
         status_event: PortStatusEventBitfield,
@@ -229,7 +228,7 @@ where
         }
 
         self.check_sink_ready_timeout(
-            sink_ready_timeout,
+            shared_state,
             &port_state.status,
             &status,
             local_port_id,
@@ -298,15 +297,15 @@ where
     }
 
     /// Process a port notification
-    async fn process_port_event<const N: usize>(
+    async fn process_port_event(
         &self,
-        sink_ready_timeout: &mut SinkReadyTimeoutEvent<N>,
+        shared_state: &mut SharedState,
         controller: &mut D::Inner,
         event: LocalPortEvent,
     ) -> Result<Output, Error<<D::Inner as Controller>::BusError>> {
         match event.event {
             InterfacePortEvent::StatusChanged(status_event) => {
-                self.process_port_status_changed(sink_ready_timeout, controller, event.port, status_event)
+                self.process_port_status_changed(shared_state, controller, event.port, status_event)
                     .await
             }
             InterfacePortEvent::Alert => {
@@ -337,17 +336,14 @@ where
 
     /// Top-level processing function
     /// Only call this fn from one place in a loop. Otherwise a deadlock could occur.
-    pub async fn process_event<const N: usize>(
+    pub async fn process_event(
         &self,
-        sink_ready_timeout: &mut SinkReadyTimeoutEvent<N>,
+        shared_state: &mut SharedState,
         event: Event,
     ) -> Result<Output, Error<<D::Inner as Controller>::BusError>> {
         let mut controller = self.controller.lock().await;
         match event {
-            Event::PortEvent(port_event) => {
-                self.process_port_event(sink_ready_timeout, &mut controller, port_event)
-                    .await
-            }
+            Event::PortEvent(port_event) => self.process_port_event(shared_state, &mut controller, port_event).await,
         }
     }
 
@@ -372,10 +368,10 @@ where
     /// Combined processing and finialization function
     pub async fn process_and_finalize_event<const N: usize>(
         &self,
-        sink_ready_timeout: &mut SinkReadyTimeoutEvent<N>,
+        shared_state: &mut SharedState,
         event: Event,
     ) -> Result<(), Error<<D::Inner as Controller>::BusError>> {
-        let output = self.process_event(sink_ready_timeout, event).await?;
+        let output = self.process_event(shared_state, event).await?;
         self.finalize(output).await
     }
 

@@ -1,9 +1,10 @@
 #![no_std]
 #![no_main]
-
+use ::tps6699x::asynchronous::embassy::interrupt::InterruptReceiver;
 use ::tps6699x::{ADDR1, TPS66994_NUM_PORTS};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_executor::Spawner;
+use embassy_futures::select::select_array;
 use embassy_imxrt::gpio::{Input, Inverter, Pull};
 use embassy_imxrt::i2c::Async;
 use embassy_imxrt::i2c::master::{Config, I2cMaster};
@@ -23,15 +24,20 @@ use static_cell::StaticCell;
 use tps6699x::asynchronous::embassy as tps6699x;
 use type_c_interface::port::ControllerId;
 use type_c_interface::port::PortRegistration;
+use type_c_interface::port::event::PortEventBitfield;
 use type_c_interface::service::event::PortEvent as ServicePortEvent;
 use type_c_service::bridge::Bridge;
 use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
-use type_c_service::driver::tps6699x::{self as tps6699x_drv, InterruptReceiver};
-use type_c_service::service::{EventReceiver, Service};
+use type_c_service::driver::tps6699x::{self as tps6699x_drv};
+use type_c_service::service::{EventReceiver as ServiceEventReceiver, Service};
 use type_c_service::wrapper::ControllerWrapper;
 use type_c_service::wrapper::backing::{IntermediateStorage, ReferencedStorage, Storage};
-use type_c_service::wrapper::event_receiver::ArrayPortEventReceivers;
 use type_c_service::wrapper::proxy::PowerProxyDevice;
+use type_c_service::wrapper::proxy::event::Event as PortEvent;
+use type_c_service::wrapper::proxy::event_receiver::{
+    EventReceiver as PortEventReceiver, InterruptReceiver as _, PortEventSplitter,
+};
+use type_c_service::wrapper::proxy::state::SharedState;
 
 extern crate rt685s_evk_example;
 
@@ -81,6 +87,8 @@ type PowerPolicyServiceType = Mutex<
 >;
 
 type ServiceType = Service<'static>;
+type SharedStateType = Mutex<GlobalRawMutex, SharedState>;
+type PortEventReceiverType = PortEventReceiver<'static, SharedStateType, DynamicReceiver<'static, PortEventBitfield>>;
 
 #[embassy_executor::task]
 async fn bridge_task(
@@ -96,14 +104,29 @@ async fn bridge_task(
 
 #[embassy_executor::task]
 async fn pd_controller_task(
-    mut event_receiver: ArrayPortEventReceivers<2, InterruptReceiver<'static, GlobalRawMutex, BusDevice<'static>>>,
+    shared_state0: &'static SharedStateType,
+    shared_state1: &'static SharedStateType,
+    mut event_receiver0: PortEventReceiverType,
+    mut event_receiver1: PortEventReceiverType,
     wrapper: &'static Wrapper<'static>,
 ) {
     loop {
-        let event = event_receiver.wait_event().await;
+        let (PortEvent::PortEvent(event), index) =
+            select_array([event_receiver0.wait_event(), event_receiver1.wait_event()]).await;
 
+        let mut shared_state = match index {
+            0 => shared_state0.lock().await,
+            1 => shared_state1.lock().await,
+            _ => unreachable!(),
+        };
         let output = wrapper
-            .process_event(&mut event_receiver.sink_ready_timeout, event)
+            .process_event(
+                &mut shared_state,
+                type_c_service::wrapper::message::Event::PortEvent(type_c_service::wrapper::message::LocalPortEvent {
+                    port: LocalPortId(index as u8),
+                    event,
+                }),
+            )
             .await;
         if let Err(e) = output {
             error!("Error processing event: {:?}", e);
@@ -123,6 +146,17 @@ async fn interrupt_task(mut int_in: Input<'static>, mut interrupt: InterruptProc
 }
 
 #[embassy_executor::task]
+async fn interrupt_splitter_task(
+    mut interrupt_receiver: InterruptReceiver<'static, GlobalRawMutex, BusDevice<'static>>,
+    mut interrupt_splitter: PortEventSplitter<2, DynamicSender<'static, PortEventBitfield>>,
+) -> ! {
+    loop {
+        let interrupts = interrupt_receiver.wait_interrupt().await;
+        interrupt_splitter.process_interrupts(interrupts).await;
+    }
+}
+
+#[embassy_executor::task]
 async fn power_policy_task(
     psu_events: PsuEventReceivers<'static, 2, DeviceType, DynamicReceiver<'static, psu::event::EventData>>,
     power_policy: &'static PowerPolicyServiceType,
@@ -133,7 +167,7 @@ async fn power_policy_task(
 #[embassy_executor::task]
 async fn type_c_service_task(
     service: &'static Mutex<GlobalRawMutex, ServiceType>,
-    event_receiver: EventReceiver<'static, PowerPolicyReceiverType>,
+    event_receiver: ServiceEventReceiver<'static, PowerPolicyReceiverType>,
     wrappers: [&'static Wrapper<'static>; NUM_PD_CONTROLLERS],
 ) {
     type_c_service::task::task(service, event_receiver, wrappers).await;
@@ -256,6 +290,26 @@ async fn main(spawner: Spawner) {
     let bridge = Bridge::new(controller_mutex, &referenced.pd_controller);
     let wrapper = WRAPPER.init(ControllerWrapper::new(controller_mutex, Default::default(), referenced));
 
+    static PORT0_SHARED_STATE: StaticCell<SharedStateType> = StaticCell::new();
+    let port0_shared_state = PORT0_SHARED_STATE.init(Mutex::new(SharedState::new()));
+
+    static PORT1_SHARED_STATE: StaticCell<SharedStateType> = StaticCell::new();
+    let port1_shared_state = PORT1_SHARED_STATE.init(Mutex::new(SharedState::new()));
+
+    static PORT0_INTERRUPT_CHANNEL: StaticCell<Channel<GlobalRawMutex, PortEventBitfield, CHANNEL_CAPACITY>> =
+        StaticCell::new();
+    let port0_interrupt_channel = PORT0_INTERRUPT_CHANNEL.init(Channel::new());
+    let port0_interrupt_receiver = port0_interrupt_channel.dyn_receiver();
+    let port0_interrupt_sender = port0_interrupt_channel.dyn_sender();
+
+    static PORT1_INTERRUPT_CHANNEL: StaticCell<Channel<GlobalRawMutex, PortEventBitfield, CHANNEL_CAPACITY>> =
+        StaticCell::new();
+    let port1_interrupt_channel = PORT1_INTERRUPT_CHANNEL.init(Channel::new());
+    let port1_interrupt_receiver = port1_interrupt_channel.dyn_receiver();
+    let port1_interrupt_sender = port1_interrupt_channel.dyn_sender();
+
+    let port_event_splitter = PortEventSplitter::new([port0_interrupt_sender, port1_interrupt_sender]);
+
     // The service is the only receiver and we only use a DynImmediatePublisher, which doesn't take a publisher slot
     static POWER_POLICY_CHANNEL: StaticCell<
         PubSubChannel<GlobalRawMutex, power_policy_interface::service::event::EventData, 4, 1, 0>,
@@ -287,7 +341,7 @@ async fn main(spawner: Spawner) {
     spawner.spawn(
         type_c_service_task(
             type_c_service,
-            EventReceiver::new(controller_context, power_policy_subscriber),
+            ServiceEventReceiver::new(controller_context, power_policy_subscriber),
             [wrapper],
         )
         .expect("Failed to create type-c service task"),
@@ -308,9 +362,17 @@ async fn main(spawner: Spawner) {
     spawner.spawn(bridge_task(bridge_receiver, bridge).expect("Failed to create bridge task"));
     spawner.spawn(
         pd_controller_task(
-            ArrayPortEventReceivers::new(InterruptReceiver::new(interrupt_receiver)),
+            port0_shared_state,
+            port1_shared_state,
+            PortEventReceiver::new(port0_shared_state, port0_interrupt_receiver),
+            PortEventReceiver::new(port1_shared_state, port1_interrupt_receiver),
             wrapper,
         )
         .expect("Failed to create pd controller task"),
+    );
+
+    spawner.spawn(
+        interrupt_splitter_task(interrupt_receiver, port_event_splitter)
+            .expect("Failed to spawn interrupt splitter task"),
     );
 }
