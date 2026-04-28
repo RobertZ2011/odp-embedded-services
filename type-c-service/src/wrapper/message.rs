@@ -16,20 +16,10 @@ pub struct LocalPortEvent {
     pub event: type_c_interface::port::event::PortEvent,
 }
 
-/// Power policy command event data
-pub struct PowerPolicyCommand {
-    /// Port ID
-    pub port: LocalPortId,
-    /// Power policy request
-    pub request: power_policy_interface::psu::CommandData,
-}
-
 /// Wrapper events
 pub enum Event {
     /// Port status changed
     PortEvent(LocalPortEvent),
-    /// Power policy command received
-    PowerPolicyCommand(PowerPolicyCommand),
 }
 
 /// Port status changed output data
@@ -52,14 +42,6 @@ pub struct OutputPdAlert {
     pub port: LocalPortId,
     /// ADO data
     pub ado: Ado,
-}
-
-/// Power policy command output data
-pub struct OutputPowerPolicyCommand {
-    /// Port ID
-    pub port: LocalPortId,
-    /// Response
-    pub response: power_policy_interface::psu::InternalResponseData,
 }
 
 pub mod vdm {
@@ -99,8 +81,6 @@ pub enum Output {
     PdAlert(OutputPdAlert),
     /// Vendor-defined messaging.
     Vdm(vdm::Output),
-    /// Power policy command received
-    PowerPolicyCommand(OutputPowerPolicyCommand),
     /// Dp status update
     DpStatusUpdate(OutputDpStatusChanged),
 }

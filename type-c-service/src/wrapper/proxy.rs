@@ -1,91 +1,42 @@
-use embassy_sync::blocking_mutex::raw::RawMutex;
-use embassy_sync::channel::{Channel, DynamicReceiver, DynamicSender};
-use embedded_services::named::Named;
-use power_policy_interface::psu::{CommandData as PolicyCommandData, InternalResponseData as PolicyResponseData, Psu};
+use embedded_services::{error, info, named::Named, sync::Lockable};
+use embedded_usb_pd::LocalPortId;
+use power_policy_interface::psu::Psu;
+use type_c_interface::port::Controller;
 
-pub struct PowerProxyChannel<M: RawMutex> {
-    command_channel: Channel<M, PolicyCommandData, 1>,
-    response_channel: Channel<M, PolicyResponseData, 1>,
-}
+use crate::util::power_policy_error_from_pd_bus_error;
 
-impl<M: RawMutex> PowerProxyChannel<M> {
-    pub fn new() -> Self {
-        Self {
-            command_channel: Channel::new(),
-            response_channel: Channel::new(),
-        }
-    }
-
-    pub fn get_device_components(
-        &self,
-    ) -> (
-        DynamicSender<'_, PolicyCommandData>,
-        DynamicReceiver<'_, PolicyResponseData>,
-    ) {
-        (self.command_channel.dyn_sender(), self.response_channel.dyn_receiver())
-    }
-
-    pub fn get_receiver(&self) -> PowerProxyReceiver<'_> {
-        PowerProxyReceiver {
-            receiver: self.command_channel.dyn_receiver(),
-            sender: self.response_channel.dyn_sender(),
-        }
-    }
-}
-
-pub struct PowerProxyReceiver<'a> {
-    sender: DynamicSender<'a, PolicyResponseData>,
-    receiver: DynamicReceiver<'a, PolicyCommandData>,
-}
-
-impl<'a> PowerProxyReceiver<'a> {
-    pub fn new(
-        receiver: DynamicReceiver<'a, PolicyCommandData>,
-        sender: DynamicSender<'a, PolicyResponseData>,
-    ) -> Self {
-        Self { receiver, sender }
-    }
-
-    pub async fn receive(&mut self) -> PolicyCommandData {
-        self.receiver.receive().await
-    }
-
-    pub async fn send(&mut self, response: PolicyResponseData) {
-        self.sender.send(response).await;
-    }
-}
-
-pub struct PowerProxyDevice<'a> {
-    sender: DynamicSender<'a, PolicyCommandData>,
-    receiver: DynamicReceiver<'a, PolicyResponseData>,
+pub struct PowerProxyDevice<'device, C: Lockable<Inner: Controller>> {
+    /// Local port
+    port: LocalPortId,
+    /// Controller
+    controller: &'device C,
     /// Per-port PSU state
     pub(crate) psu_state: power_policy_interface::psu::State,
     name: &'static str,
 }
 
-impl<'a> PowerProxyDevice<'a> {
-    pub fn new(
-        name: &'static str,
-        sender: DynamicSender<'a, PolicyCommandData>,
-        receiver: DynamicReceiver<'a, PolicyResponseData>,
-    ) -> Self {
+impl<'device, C: Lockable<Inner: Controller>> PowerProxyDevice<'device, C> {
+    pub fn new(name: &'static str, port: LocalPortId, controller: &'device C) -> Self {
         Self {
             name,
-            sender,
-            receiver,
+            controller,
+            port,
             psu_state: power_policy_interface::psu::State::default(),
         }
     }
-
-    async fn execute(&mut self, command: PolicyCommandData) -> PolicyResponseData {
-        self.sender.send(command).await;
-        self.receiver.receive().await
-    }
 }
 
-impl<'a> Psu for PowerProxyDevice<'a> {
+impl<'device, C: Lockable<Inner: Controller>> Psu for PowerProxyDevice<'device, C> {
     async fn disconnect(&mut self) -> Result<(), power_policy_interface::psu::Error> {
-        self.execute(PolicyCommandData::Disconnect).await?.complete_or_err()?;
+        self.controller
+            .lock()
+            .await
+            .enable_sink_path(self.port, false)
+            .await
+            .map_err(|e| {
+                error!("({}): Error disabling sink path", self.name);
+                power_policy_error_from_pd_bus_error(e)
+            })?;
         self.psu_state.disconnect(false)
     }
 
@@ -93,19 +44,30 @@ impl<'a> Psu for PowerProxyDevice<'a> {
         &mut self,
         capability: power_policy_interface::capability::ProviderPowerCapability,
     ) -> Result<(), power_policy_interface::psu::Error> {
-        self.execute(PolicyCommandData::ConnectAsProvider(capability))
-            .await?
-            .complete_or_err()?;
-        self.psu_state.connect_provider(capability)
+        info!("({}): Connect as provider: {:#?}", self.name, capability);
+        // TODO: Implement controller over provider enablement
+        self.psu_state.connect_provider(capability).inspect_err(|e| {
+            error!("({}): Failed to transition to provider state: {:#?}", self.name, e);
+        })
     }
 
     async fn connect_consumer(
         &mut self,
         capability: power_policy_interface::capability::ConsumerPowerCapability,
     ) -> Result<(), power_policy_interface::psu::Error> {
-        self.execute(PolicyCommandData::ConnectAsConsumer(capability))
-            .await?
-            .complete_or_err()?;
+        info!(
+            "({}): Connect as consumer: {:?}, enable input switch",
+            self.name, capability
+        );
+        self.controller
+            .lock()
+            .await
+            .enable_sink_path(self.port, true)
+            .await
+            .map_err(|e| {
+                error!("({}): Error enabling sink path", self.name);
+                power_policy_error_from_pd_bus_error(e)
+            })?;
         self.psu_state.connect_consumer(capability)
     }
 
@@ -118,14 +80,8 @@ impl<'a> Psu for PowerProxyDevice<'a> {
     }
 }
 
-impl<'a> Named for PowerProxyDevice<'a> {
+impl<'device, C: Lockable<Inner: Controller>> Named for PowerProxyDevice<'device, C> {
     fn name(&self) -> &'static str {
         self.name
-    }
-}
-
-impl<M: RawMutex> Default for PowerProxyChannel<M> {
-    fn default() -> Self {
-        Self::new()
     }
 }

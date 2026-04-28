@@ -5,9 +5,9 @@ use embassy_sync::pubsub::{DynImmediatePublisher, DynSubscriber, PubSubChannel};
 use embassy_time::Timer;
 use embedded_services::GlobalRawMutex;
 use embedded_services::event::MapSender;
-use embedded_usb_pd::GlobalPortId;
 use embedded_usb_pd::ado::Ado;
 use embedded_usb_pd::type_c::Current;
+use embedded_usb_pd::{GlobalPortId, LocalPortId};
 use log::*;
 use power_policy_interface::charger::mock::ChargerType;
 use power_policy_interface::psu;
@@ -34,7 +34,8 @@ const CONTROLLER0_ID: ControllerId = ControllerId(0);
 const PORT0_ID: GlobalPortId = GlobalPortId(0);
 const DELAY_MS: u64 = 1000;
 
-type DeviceType = Mutex<GlobalRawMutex, PowerProxyDevice<'static>>;
+type ControllerType = Mutex<GlobalRawMutex, mock_controller::Controller<'static>>;
+type DeviceType = Mutex<GlobalRawMutex, PowerProxyDevice<'static, ControllerType>>;
 
 type PowerPolicySenderType = MapSender<
     power_policy_interface::service::event::Event<'static, DeviceType>,
@@ -59,9 +60,9 @@ type ServiceType = Service<'static>;
 
 #[embassy_executor::task]
 async fn controller_task(
-    mut event_receiver: ArrayPortEventReceivers<'static, 1, mock_controller::InterruptReceiver<'static>>,
+    mut event_receiver: ArrayPortEventReceivers<1, mock_controller::InterruptReceiver<'static>>,
     wrapper: &'static Wrapper<'static>,
-    controller: &'static Mutex<GlobalRawMutex, mock_controller::Controller<'static>>,
+    controller: &'static ControllerType,
 ) {
     controller.lock().await.custom_function();
 
@@ -80,7 +81,7 @@ async fn controller_task(
             info!("Port{}: PD alert received: {:?}", port.0, ado);
         }
 
-        if let Err(e) = wrapper.finalize(&mut event_receiver.power_proxies, output).await {
+        if let Err(e) = wrapper.finalize(output).await {
             error!("Error finalizing output: {e:?}");
         }
     }
@@ -109,9 +110,12 @@ async fn task(spawner: Spawner) {
     static STATE: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state = STATE.init(mock_controller::ControllerState::new());
 
+    static CONTROLLER: StaticCell<ControllerType> = StaticCell::new();
+    let controller = CONTROLLER.init(Mutex::new(mock_controller::Controller::new(state)));
+
     static PORT0_CHANNEL: Channel<GlobalRawMutex, ServicePortEvent, CHANNEL_CAPACITY> = Channel::new();
 
-    static STORAGE: StaticCell<Storage<1, GlobalRawMutex>> = StaticCell::new();
+    static STORAGE: StaticCell<Storage<1>> = StaticCell::new();
     let storage = STORAGE.init(Storage::new(
         controller_context,
         CONTROLLER0_ID,
@@ -129,14 +133,15 @@ async fn task(spawner: Spawner) {
     let policy_sender = policy_channel.dyn_sender();
     let policy_receiver = policy_channel.dyn_receiver();
 
-    let (intermediate, power_event_receivers) = storage
-        .try_create_intermediate([("Pd0", policy_sender)])
+    let intermediate = storage
+        .try_create_intermediate([("Pd0", LocalPortId(0), controller, policy_sender)])
         .expect("Failed to create intermediate storage");
 
     static INTERMEDIATE: StaticCell<
         type_c_service::wrapper::backing::IntermediateStorage<
             1,
             GlobalRawMutex,
+            ControllerType,
             DynamicSender<'static, psu::event::EventData>,
         >,
     > = StaticCell::new();
@@ -146,6 +151,7 @@ async fn task(spawner: Spawner) {
         type_c_service::wrapper::backing::ReferencedStorage<
             1,
             GlobalRawMutex,
+            ControllerType,
             DynamicSender<'_, psu::event::EventData>,
         >,
     > = StaticCell::new();
@@ -155,13 +161,9 @@ async fn task(spawner: Spawner) {
             .expect("Failed to create referenced storage"),
     );
 
-    let event_receiver = ArrayPortEventReceivers::new(state.create_interrupt_receiver(), power_event_receivers);
-
-    static CONTROLLER: StaticCell<Mutex<GlobalRawMutex, mock_controller::Controller>> = StaticCell::new();
-    let controller = CONTROLLER.init(Mutex::new(mock_controller::Controller::new(state)));
+    let event_receiver = ArrayPortEventReceivers::new(state.create_interrupt_receiver());
 
     static WRAPPER: StaticCell<mock_controller::Wrapper> = StaticCell::new();
-
     let wrapper = WRAPPER.init(mock_controller::Wrapper::new(
         controller,
         Default::default(),

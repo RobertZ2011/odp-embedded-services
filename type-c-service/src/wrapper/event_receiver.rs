@@ -2,14 +2,13 @@
 use core::array;
 use core::future::pending;
 use core::pin::pin;
-use embassy_futures::select::{Either3, select_slice, select3};
+use embassy_futures::select::{Either, select, select_slice};
 use embassy_time::{Instant, Timer};
-use embedded_services::{debug, trace};
+use embedded_services::debug;
 use embedded_usb_pd::LocalPortId;
 
 use crate::PortEventStreamer;
-use crate::wrapper::message::{Event, LocalPortEvent, PowerPolicyCommand};
-use crate::wrapper::proxy::PowerProxyReceiver;
+use crate::wrapper::message::{Event, LocalPortEvent};
 use type_c_interface::port::event::{PortEvent, PortEventBitfield, PortStatusEventBitfield};
 
 /// Trait used for receiving interrupt from the controller.
@@ -56,45 +55,6 @@ impl<const N: usize, Receiver: InterruptReceiver<N>> PortEventReceiver<N, Receiv
                 self.streaming_state = None;
             }
         }
-    }
-}
-
-/// Struct to receive power policy messages.
-pub struct ArrayPowerProxyEventReceiver<'device, const N: usize> {
-    receivers: [PowerProxyReceiver<'device>; N],
-}
-
-impl<'device, const N: usize> ArrayPowerProxyEventReceiver<'device, N> {
-    /// Create a new array power proxy event receiver
-    pub fn new(receivers: [PowerProxyReceiver<'device>; N]) -> Self {
-        Self { receivers }
-    }
-
-    /// Wait for the next power policy command
-    pub async fn wait_next(&mut self) -> PowerPolicyCommand {
-        let mut futures = heapless::Vec::<_, N>::new();
-        for receiver in self.receivers.iter_mut() {
-            // Size is fixed at compile time, so no chance of overflow
-            let _ = futures.push(async { receiver.receive().await });
-        }
-
-        // DROP SAFETY: Select over drop safe futures
-        let (request, local_id) = select_slice(pin!(futures.as_mut_slice())).await;
-        trace!("Power command: device{} {:#?}", local_id, request);
-        PowerPolicyCommand {
-            port: LocalPortId(local_id as u8),
-            request,
-        }
-    }
-
-    /// Temporary function until the conversion to direct function calls is complete
-    pub async fn send_response(
-        &mut self,
-        port: LocalPortId,
-        response: power_policy_interface::psu::InternalResponseData,
-    ) -> Result<(), ()> {
-        self.receivers.get_mut(port.0 as usize).ok_or(())?.send(response).await;
-        Ok(())
     }
 }
 
@@ -164,23 +124,18 @@ impl<const N: usize> Default for SinkReadyTimeoutEvent<N> {
 }
 
 /// Struct used for containing controller event receivers.
-pub struct ArrayPortEventReceivers<'device, const N: usize, PortInterrupts: InterruptReceiver<N>> {
+pub struct ArrayPortEventReceivers<const N: usize, PortInterrupts: InterruptReceiver<N>> {
     /// Port event receiver
     pub port_events: PortEventReceiver<N, PortInterrupts>,
-    /// Power proxy event receiver
-    pub power_proxies: ArrayPowerProxyEventReceiver<'device, N>,
     /// Sink ready timeout event receiver
     pub sink_ready_timeout: SinkReadyTimeoutEvent<N>,
 }
 
-impl<'device, const N: usize, PortInterrupts: InterruptReceiver<N>>
-    ArrayPortEventReceivers<'device, N, PortInterrupts>
-{
+impl<const N: usize, PortInterrupts: InterruptReceiver<N>> ArrayPortEventReceivers<N, PortInterrupts> {
     /// Create a new instance
-    pub fn new(port_interrupts: PortInterrupts, power_proxies: [PowerProxyReceiver<'device>; N]) -> Self {
+    pub fn new(port_interrupts: PortInterrupts) -> Self {
         Self {
             port_events: PortEventReceiver::new(port_interrupts),
-            power_proxies: ArrayPowerProxyEventReceiver::new(power_proxies),
             sink_ready_timeout: SinkReadyTimeoutEvent::new(),
         }
     }
@@ -189,16 +144,9 @@ impl<'device, const N: usize, PortInterrupts: InterruptReceiver<N>>
     ///
     /// Returns the local port ID and the event bitfield.
     pub async fn wait_event(&mut self) -> Event {
-        match select3(
-            self.port_events.wait_next(),
-            self.power_proxies.wait_next(),
-            self.sink_ready_timeout.wait_next(),
-        )
-        .await
-        {
-            Either3::First(event) => Event::PortEvent(event),
-            Either3::Second(command) => Event::PowerPolicyCommand(command),
-            Either3::Third(port) => {
+        match select(self.port_events.wait_next(), self.sink_ready_timeout.wait_next()).await {
+            Either::First(event) => Event::PortEvent(event),
+            Either::Second(port) => {
                 let mut status_event = PortStatusEventBitfield::none();
                 status_event.set_sink_ready(true);
                 Event::PortEvent(LocalPortEvent {

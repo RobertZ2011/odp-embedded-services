@@ -11,11 +11,10 @@
 //!
 //! [`ControllerWrapper::finalize`] consumes [`message::Output`] and responds to any deferred requests, performs
 //! any caching/buffering of data, and notifies the type-C service implementation of the event if needed.
-use core::error;
 use core::ops::DerefMut;
 
 use crate::wrapper::backing::PortState;
-use crate::wrapper::event_receiver::{ArrayPowerProxyEventReceiver, SinkReadyTimeoutEvent};
+use crate::wrapper::event_receiver::SinkReadyTimeoutEvent;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Instant;
@@ -63,13 +62,13 @@ pub struct ControllerWrapper<
 {
     controller: &'device D,
     /// Registration information for services
-    pub registration: backing::Registration<'device, M>,
+    pub registration: backing::Registration<'device>,
     /// SW port status event signal
     sw_status_event: Signal<M, ()>,
     /// General config
     config: config::Config,
     /// Port proxies
-    pub ports: &'device [backing::Port<'device, M, S>],
+    pub ports: &'device [backing::Port<'device, M, D, S>],
 }
 
 impl<'device, M: RawMutex, D: Lockable, S: event::Sender<power_policy_interface::psu::event::EventData>>
@@ -81,7 +80,7 @@ where
     pub fn new<const N: usize>(
         controller: &'device D,
         config: config::Config,
-        storage: &'device backing::ReferencedStorage<'device, N, M, S>,
+        storage: &'device backing::ReferencedStorage<'device, N, M, D, S>,
     ) -> Self {
         const {
             assert!(N > 0 && N <= MAX_SUPPORTED_PORTS, "Invalid number of ports");
@@ -349,19 +348,11 @@ where
                 self.process_port_event(sink_ready_timeout, &mut controller, port_event)
                     .await
             }
-            Event::PowerPolicyCommand(PowerPolicyCommand { port, request }) => {
-                let response = self.process_power_command(&mut controller, port, &request).await;
-                Ok(Output::PowerPolicyCommand(OutputPowerPolicyCommand { port, response }))
-            }
         }
     }
 
     /// Event loop finalize
-    pub async fn finalize<const N: usize>(
-        &self,
-        event_receiver: &mut ArrayPowerProxyEventReceiver<'device, N>,
-        output: Output,
-    ) -> Result<(), Error<<D::Inner as Controller>::BusError>> {
+    pub async fn finalize(&self, output: Output) -> Result<(), Error<<D::Inner as Controller>::BusError>> {
         match output {
             Output::Nop => Ok(()),
             Output::PortStatusChanged(OutputPortStatusChanged {
@@ -371,13 +362,6 @@ where
             }) => self.finalize_port_status_change(port, status_event, status).await,
             Output::PdAlert(OutputPdAlert { port, ado }) => self.finalize_pd_alert(port, ado).await,
             Output::Vdm(vdm) => self.finalize_vdm(vdm).await.map_err(Error::Pd),
-            Output::PowerPolicyCommand(OutputPowerPolicyCommand { port, response }) => {
-                event_receiver
-                    .send_response(port, response)
-                    .await
-                    .map_err(|_| Error::Pd(PdError::Failed))?;
-                Ok(())
-            }
             Output::DpStatusUpdate(_) => {
                 // Nothing to do here
                 Ok(())
@@ -389,11 +373,10 @@ where
     pub async fn process_and_finalize_event<const N: usize>(
         &self,
         sink_ready_timeout: &mut SinkReadyTimeoutEvent<N>,
-        power_event_receiver: &mut ArrayPowerProxyEventReceiver<'device, N>,
         event: Event,
     ) -> Result<(), Error<<D::Inner as Controller>::BusError>> {
         let output = self.process_event(sink_ready_timeout, event).await?;
-        self.finalize(power_event_receiver, output).await
+        self.finalize(output).await
     }
 
     /// Register all devices with their respective services
