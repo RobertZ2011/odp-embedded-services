@@ -1,4 +1,4 @@
-use crate::wrapper::event_receiver::SinkReadyTimeoutEvent;
+use crate::wrapper::proxy::state::SharedState;
 use embassy_time::Duration;
 use embedded_services::debug;
 use embedded_usb_pd::constants::{T_PS_TRANSITION_EPR_MS, T_PS_TRANSITION_SPR_MS};
@@ -15,9 +15,9 @@ where
     /// After accepting a sink contract (new contract as consumer), the PD spec guarantees that the
     /// source will be available to provide power after `tPSTransition`. This allows us to handle transitions
     /// even for controllers that might not always broadcast sink ready events.
-    pub(super) fn check_sink_ready_timeout<const N: usize>(
+    pub(super) fn check_sink_ready_timeout(
         &self,
-        sink_ready_timeout: &mut SinkReadyTimeoutEvent<N>,
+        shared_state: &mut SharedState,
         previous_status: &PortStatus,
         new_status: &PortStatus,
         port: LocalPortId,
@@ -25,7 +25,7 @@ where
         sink_ready: bool,
     ) -> Result<(), PdError> {
         let contract_changed = previous_status.available_sink_contract != new_status.available_sink_contract;
-        let timeout = sink_ready_timeout.get_timeout(port);
+        let timeout = &mut shared_state.sink_ready_timeout;
 
         // Don't start the timeout if the sink has signaled it's ready or if the contract didn't change.
         // The latter ensures that soft resets won't continually reset the ready timeout
@@ -45,12 +45,12 @@ where
             .0 * 2;
 
             debug!("Port{}: Sink ready timeout started for {}ms", port.0, timeout_ms);
-            sink_ready_timeout.set_timeout(port, Instant::now() + Duration::from_millis(timeout_ms as u64));
+            *timeout = Some(Instant::now() + Duration::from_millis(timeout_ms as u64));
         } else if timeout.is_some()
             && (!new_status.is_connected() || new_status.available_sink_contract.is_none() || sink_ready)
         {
             debug!("Port{}: Sink ready timeout cleared", port.0);
-            sink_ready_timeout.clear_timeout(port);
+            *timeout = None;
         }
         Ok(())
     }
