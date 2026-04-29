@@ -1,13 +1,12 @@
 #![no_std]
 #![no_main]
 
+use ::tps6699x::ADDR1;
 use ::tps6699x::asynchronous::embassy::interrupt::InterruptReceiver;
-use ::tps6699x::{ADDR1, TPS66994_NUM_PORTS};
 use cfu_service::CfuClient;
 use cfu_service::component::{CfuDevice, InternalResponseData, RequestData};
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_executor::Spawner;
-use embassy_futures::select::select_array;
 use embassy_imxrt::gpio::{Input, Inverter, Pull};
 use embassy_imxrt::i2c::Async;
 use embassy_imxrt::i2c::master::{Config, I2cMaster};
@@ -30,16 +29,13 @@ use power_policy_service::service::registration::ArrayRegistration;
 use static_cell::StaticCell;
 use tps6699x::asynchronous::embassy as tps6699x;
 use type_c_interface::port::event::PortEventBitfield;
-use type_c_interface::port::{ControllerId, PortRegistration};
+use type_c_interface::port::{ControllerId, Device, PortRegistration};
 use type_c_interface::service::event::PortEvent as ServicePortEvent;
 use type_c_service::bridge::Bridge;
 use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
 use type_c_service::driver::tps6699x::{self as tps6699x_drv};
 use type_c_service::service::{EventReceiver as ServiceEventReceiver, Service};
-use type_c_service::wrapper::ControllerWrapper;
-use type_c_service::wrapper::backing::{IntermediateStorage, ReferencedStorage, Storage};
 use type_c_service::wrapper::proxy::PowerProxyDevice;
-use type_c_service::wrapper::proxy::event::Event as PortEvent;
 use type_c_service::wrapper::proxy::event_receiver::{
     EventReceiver as PortEventReceiver, InterruptReceiver as _, PortEventSplitter,
 };
@@ -62,27 +58,30 @@ impl cfu_service::customization::Customization for CfuCustomization {
     }
 }
 
-type DeviceType = Mutex<GlobalRawMutex, PowerProxyDevice<'static, Tps6699xMutex<'static>>>;
+type PortSharedStateType = Mutex<GlobalRawMutex, PortSharedState>;
+type PortType = Mutex<
+    GlobalRawMutex,
+    PowerProxyDevice<
+        'static,
+        Tps6699xMutex<'static>,
+        PortSharedStateType,
+        DynamicSender<'static, power_policy_interface::psu::event::EventData>,
+    >,
+>;
 type ChargerType = power_policy_interface::charger::mock::ChargerType;
 
 type BusMaster<'a> = I2cMaster<'a, Async>;
 type BusDevice<'a> = I2cDevice<'a, GlobalRawMutex, BusMaster<'a>>;
 type Tps6699xMutex<'a> = Mutex<GlobalRawMutex, tps6699x_drv::Tps6699x<'a, GlobalRawMutex, BusDevice<'a>>>;
-type Wrapper<'a> = ControllerWrapper<
-    'a,
-    GlobalRawMutex,
-    Tps6699xMutex<'a>,
-    DynamicSender<'a, power_policy_interface::psu::event::EventData>,
->;
 type Controller<'a> = tps6699x::controller::Controller<GlobalRawMutex, BusDevice<'a>>;
 type InterruptProcessor<'a> = tps6699x::interrupt::InterruptProcessor<'a, GlobalRawMutex, BusDevice<'a>>;
 
 type PowerPolicySenderType = MapSender<
-    power_policy_interface::service::event::Event<'static, DeviceType>,
+    power_policy_interface::service::event::Event<'static, PortType>,
     power_policy_interface::service::event::EventData,
     DynImmediatePublisher<'static, power_policy_interface::service::event::EventData>,
     fn(
-        power_policy_interface::service::event::Event<'static, DeviceType>,
+        power_policy_interface::service::event::Event<'static, PortType>,
     ) -> power_policy_interface::service::event::EventData,
 >;
 
@@ -92,20 +91,17 @@ type PowerPolicyServiceType = Mutex<
     GlobalRawMutex,
     power_policy_service::service::Service<
         'static,
-        ArrayRegistration<'static, DeviceType, 2, PowerPolicySenderType, 1, ChargerType, 0>,
+        ArrayRegistration<'static, PortType, 2, PowerPolicySenderType, 1, ChargerType, 0>,
     >,
 >;
 
 type ServiceType = Service<'static>;
+type PortEventReceiverType =
+    PortEventReceiver<'static, PortSharedStateType, DynamicReceiver<'static, PortEventBitfield>>;
 type CfuUpdaterSharedStateType = Mutex<GlobalRawMutex, cfu_service::basic::state::SharedState>;
 type CfuUpdaterType<'a> =
     cfu_service::basic::Updater<'a, Tps6699xMutex<'a>, CfuUpdaterSharedStateType, CfuCustomization>;
 
-type PortSharedStateType = Mutex<GlobalRawMutex, PortSharedState>;
-type PortEventReceiverType =
-    PortEventReceiver<'static, PortSharedStateType, DynamicReceiver<'static, PortEventBitfield>>;
-
-const NUM_PD_CONTROLLERS: usize = 1;
 const CONTROLLER0_ID: ControllerId = ControllerId(0);
 const CONTROLLER0_CFU_ID: ComponentId = 0x12;
 const PORT0_ID: GlobalPortId = GlobalPortId(0);
@@ -124,39 +120,12 @@ async fn bridge_task(
 }
 
 #[embassy_executor::task]
-async fn pd_controller_task(
-    shared_state0: &'static PortSharedStateType,
-    shared_state1: &'static PortSharedStateType,
-    mut event_receiver0: PortEventReceiverType,
-    mut event_receiver1: PortEventReceiverType,
-    wrapper: &'static Wrapper<'static>,
-) {
+async fn port_task(mut event_receiver: PortEventReceiverType, port: &'static PortType) {
     loop {
-        let (PortEvent::PortEvent(event), index) =
-            select_array([event_receiver0.wait_event(), event_receiver1.wait_event()]).await;
-
-        let mut shared_state = match index {
-            0 => shared_state0.lock().await,
-            1 => shared_state1.lock().await,
-            _ => unreachable!(),
-        };
-        let output = wrapper
-            .process_event(
-                &mut shared_state,
-                type_c_service::wrapper::message::Event::PortEvent(type_c_service::wrapper::message::LocalPortEvent {
-                    port: LocalPortId(index as u8),
-                    event,
-                }),
-            )
-            .await;
+        let event = event_receiver.wait_event().await;
+        let output = port.lock().await.process_event(event).await;
         if let Err(e) = output {
             error!("Error processing event: {:?}", e);
-            continue;
-        }
-
-        let output = output.unwrap();
-        if let Err(e) = wrapper.finalize(output).await {
-            error!("Error finalizing output: {:?}", e);
         }
     }
 }
@@ -272,7 +241,7 @@ async fn fw_update_task(cfu_client: &'static CfuClient) {
 
 #[embassy_executor::task]
 async fn power_policy_task(
-    psu_events: PsuEventReceivers<'static, 2, DeviceType, DynamicReceiver<'static, psu::event::EventData>>,
+    psu_events: PsuEventReceivers<'static, 2, PortType, DynamicReceiver<'static, psu::event::EventData>>,
     power_policy: &'static PowerPolicyServiceType,
 ) {
     power_policy_service::service::task::psu_task(psu_events, power_policy).await;
@@ -282,9 +251,8 @@ async fn power_policy_task(
 async fn type_c_service_task(
     service: &'static Mutex<GlobalRawMutex, ServiceType>,
     event_receiver: ServiceEventReceiver<'static, PowerPolicyReceiverType>,
-    wrappers: [&'static Wrapper<'static>; NUM_PD_CONTROLLERS],
 ) {
-    type_c_service::task::task(service, event_receiver, wrappers).await;
+    type_c_service::task::task(service, event_receiver).await;
 }
 
 #[embassy_executor::main]
@@ -341,23 +309,24 @@ async fn main(spawner: Spawner) {
 
     static PORT0_CHANNEL: Channel<GlobalRawMutex, ServicePortEvent, CHANNEL_CAPACITY> = Channel::new();
     static PORT1_CHANNEL: Channel<GlobalRawMutex, ServicePortEvent, CHANNEL_CAPACITY> = Channel::new();
-    static STORAGE: StaticCell<Storage<TPS66994_NUM_PORTS>> = StaticCell::new();
-    let storage = STORAGE.init(Storage::new(
-        controller_context,
-        CONTROLLER0_ID,
-        [
-            PortRegistration {
-                id: PORT0_ID,
-                sender: PORT0_CHANNEL.dyn_sender(),
-                receiver: PORT0_CHANNEL.dyn_receiver(),
-            },
-            PortRegistration {
-                id: PORT1_ID,
-                sender: PORT1_CHANNEL.dyn_sender(),
-                receiver: PORT1_CHANNEL.dyn_receiver(),
-            },
-        ],
-    ));
+    static PORT_REGISTRATION: StaticCell<[PortRegistration; 2]> = StaticCell::new();
+    let port_registration = PORT_REGISTRATION.init([
+        PortRegistration {
+            id: PORT0_ID,
+            sender: PORT0_CHANNEL.dyn_sender(),
+            receiver: PORT0_CHANNEL.dyn_receiver(),
+        },
+        PortRegistration {
+            id: PORT1_ID,
+            sender: PORT1_CHANNEL.dyn_sender(),
+            receiver: PORT1_CHANNEL.dyn_receiver(),
+        },
+    ]);
+
+    static PD_REGISTRATION: StaticCell<Device<'static>> = StaticCell::new();
+    let pd_registration = PD_REGISTRATION.init(Device::new(CONTROLLER0_ID, port_registration));
+
+    controller_context.register_controller(pd_registration).unwrap();
 
     static POLICY_CHANNEL0: StaticCell<Channel<GlobalRawMutex, psu::event::EventData, 1>> = StaticCell::new();
     let policy_channel0 = POLICY_CHANNEL0.init(Channel::new());
@@ -368,36 +337,6 @@ async fn main(spawner: Spawner) {
     let policy_channel1 = POLICY_CHANNEL1.init(Channel::new());
     let policy_sender1 = policy_channel1.dyn_sender();
     let policy_receiver1 = policy_channel1.dyn_receiver();
-
-    let intermediate = storage
-        .try_create_intermediate([
-            ("Pd0", LocalPortId(0), controller_mutex, policy_sender0),
-            ("Pd1", LocalPortId(1), controller_mutex, policy_sender1),
-        ])
-        .expect("Failed to create intermediate storage");
-    static INTERMEDIATE: StaticCell<
-        IntermediateStorage<
-            TPS66994_NUM_PORTS,
-            GlobalRawMutex,
-            Tps6699xMutex<'static>,
-            DynamicSender<'static, psu::event::EventData>,
-        >,
-    > = StaticCell::new();
-    let intermediate = INTERMEDIATE.init(intermediate);
-
-    static REFERENCED: StaticCell<
-        ReferencedStorage<
-            TPS66994_NUM_PORTS,
-            GlobalRawMutex,
-            Tps6699xMutex<'_>,
-            DynamicSender<'_, power_policy_interface::psu::event::EventData>,
-        >,
-    > = StaticCell::new();
-    let referenced = REFERENCED.init(
-        intermediate
-            .try_create_referenced()
-            .expect("Failed to create referenced storage"),
-    );
 
     // Create controller CFU device and updater
     static CFU_DEVICE: StaticCell<CfuDevice> = StaticCell::new();
@@ -416,22 +355,43 @@ async fn main(spawner: Spawner) {
         CONTROLLER0_CFU_ID,
         CfuCustomization,
     );
-    let bridge_receiver = BridgeEventReceiver::new(&referenced.pd_controller);
-    let bridge = Bridge::new(controller_mutex, &referenced.pd_controller);
+    let bridge_receiver = BridgeEventReceiver::new(pd_registration);
+    let bridge = Bridge::new(controller_mutex, pd_registration);
 
     // Create CFU client
     static CFU_CLIENT: OnceLock<CfuClient> = OnceLock::new();
     let cfu_client = CfuClient::new(&CFU_CLIENT).await;
     cfu_client.register_device(cfu_device).unwrap();
 
-    static WRAPPER: StaticCell<Wrapper> = StaticCell::new();
-    let wrapper = WRAPPER.init(ControllerWrapper::new(controller_mutex, Default::default(), referenced));
-
     static PORT0_SHARED_STATE: StaticCell<PortSharedStateType> = StaticCell::new();
     let port0_shared_state = PORT0_SHARED_STATE.init(Mutex::new(PortSharedState::new()));
 
     static PORT1_SHARED_STATE: StaticCell<PortSharedStateType> = StaticCell::new();
     let port1_shared_state = PORT1_SHARED_STATE.init(Mutex::new(PortSharedState::new()));
+
+    static PORT0: StaticCell<PortType> = StaticCell::new();
+    let port0 = PORT0.init(Mutex::new(PowerProxyDevice::new(
+        "PD0",
+        Default::default(),
+        LocalPortId(0),
+        PORT0_ID,
+        controller_mutex,
+        port0_shared_state,
+        policy_sender0,
+        controller_context,
+    )));
+
+    static PORT1: StaticCell<PortType> = StaticCell::new();
+    let port1 = PORT1.init(Mutex::new(PowerProxyDevice::new(
+        "PD1",
+        Default::default(),
+        LocalPortId(1),
+        PORT1_ID,
+        controller_mutex,
+        port1_shared_state,
+        policy_sender1,
+        controller_context,
+    )));
 
     static PORT0_INTERRUPT_CHANNEL: StaticCell<Channel<GlobalRawMutex, PortEventBitfield, CHANNEL_CAPACITY>> =
         StaticCell::new();
@@ -460,7 +420,7 @@ async fn main(spawner: Spawner) {
     let power_policy_subscriber = power_policy_channel.dyn_subscriber().unwrap();
 
     let power_policy_registration = ArrayRegistration {
-        psus: [&wrapper.ports[0].proxy, &wrapper.ports[1].proxy],
+        psus: [port0, port1],
         chargers: [],
         service_senders: [power_policy_sender],
     };
@@ -479,7 +439,6 @@ async fn main(spawner: Spawner) {
         type_c_service_task(
             type_c_service,
             ServiceEventReceiver::new(controller_context, power_policy_subscriber),
-            [wrapper],
         )
         .expect("Failed to spawn type-c service task"),
     );
@@ -487,10 +446,7 @@ async fn main(spawner: Spawner) {
     info!("Spawining power policy task");
     spawner.spawn(
         power_policy_task(
-            PsuEventReceivers::new(
-                [&wrapper.ports[0].proxy, &wrapper.ports[1].proxy],
-                [policy_receiver0, policy_receiver1],
-            ),
+            PsuEventReceivers::new([port0, port1], [policy_receiver0, policy_receiver1]),
             power_service,
         )
         .expect("Failed to create power policy task"),
@@ -498,14 +454,19 @@ async fn main(spawner: Spawner) {
 
     spawner.spawn(bridge_task(bridge_receiver, bridge).expect("Failed to create bridge task"));
     spawner.spawn(
-        pd_controller_task(
-            port0_shared_state,
-            port1_shared_state,
+        port_task(
             PortEventReceiver::new(port0_shared_state, port0_interrupt_receiver),
-            PortEventReceiver::new(port1_shared_state, port1_interrupt_receiver),
-            wrapper,
+            port0,
         )
-        .expect("Failed to create pd controller task"),
+        .expect("Failed to create controller0 task"),
+    );
+
+    spawner.spawn(
+        port_task(
+            PortEventReceiver::new(port1_shared_state, port1_interrupt_receiver),
+            port1,
+        )
+        .expect("Failed to create controller1 task"),
     );
 
     spawner.spawn(
