@@ -30,6 +30,8 @@ use tps6699x::asynchronous::embassy as tps6699x;
 use type_c_interface::port::ControllerId;
 use type_c_interface::port::PortRegistration;
 use type_c_interface::service::event::PortEvent as ServicePortEvent;
+use type_c_service::bridge::Bridge;
+use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
 use type_c_service::driver::tps6699x::{self as tps6699x_drv, InterruptReceiver};
 use type_c_service::service::{EventReceiver, Service};
 use type_c_service::wrapper::ControllerWrapper;
@@ -96,6 +98,18 @@ const CONTROLLER0_ID: ControllerId = ControllerId(0);
 const CONTROLLER0_CFU_ID: ComponentId = 0x12;
 const PORT0_ID: GlobalPortId = GlobalPortId(0);
 const PORT1_ID: GlobalPortId = GlobalPortId(1);
+
+#[embassy_executor::task]
+async fn bridge_task(
+    mut event_receiver: BridgeEventReceiver,
+    mut bridge: Bridge<'static, Tps6699xMutex<'static>>,
+) -> ! {
+    loop {
+        let event = event_receiver.wait_next().await;
+        let output = bridge.process_event(event).await;
+        event_receiver.finalize(output);
+    }
+}
 
 #[embassy_executor::task]
 async fn pd_controller_task(
@@ -339,6 +353,8 @@ async fn main(spawner: Spawner) {
         referenced,
         Validator,
     ));
+    let bridge_receiver = BridgeEventReceiver::new(&referenced.pd_controller);
+    let bridge = Bridge::new(controller_mutex, &referenced.pd_controller);
 
     // Create power policy service
     // The service is the only receiver and we only use a DynImmediatePublisher, which doesn't take a publisher slot
@@ -394,12 +410,12 @@ async fn main(spawner: Spawner) {
         .expect("Failed to create power policy task"),
     );
 
+    spawner.spawn(bridge_task(bridge_receiver, bridge).expect("Failed to create bridge task"));
     spawner.spawn(
         pd_controller_task(
             ArrayPortEventReceivers::new(
                 InterruptReceiver::new(interrupt_receiver),
                 power_event_receivers,
-                &referenced.pd_controller,
                 &storage.cfu_device,
             ),
             wrapper,
