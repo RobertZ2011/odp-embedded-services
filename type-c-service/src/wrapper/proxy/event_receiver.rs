@@ -3,6 +3,7 @@ use core::array;
 use core::future::pending;
 use embassy_futures::select::{Either, select};
 use embassy_time::Timer;
+use embedded_services::debug;
 use embedded_services::event::{Receiver, Sender};
 use embedded_services::sync::Lockable;
 
@@ -101,7 +102,19 @@ impl<'a, State: Lockable<Inner = SharedState>, InterruptReceiver: Receiver<PortE
     ///
     /// Returns the local port ID and the event bitfield.
     pub async fn wait_event(&mut self) -> Event {
-        let timeout = self.shared_state.lock().await.sink_ready_timeout;
+        let timeout = {
+            let mut shared_state = self.shared_state.lock().await;
+            if shared_state.sw_status_event != PortStatusEventBitfield::none() {
+                let sw_event = shared_state.sw_status_event;
+                shared_state.sw_status_event = PortStatusEventBitfield::none();
+                debug!("Processing pending software status event: {:#?}", sw_event);
+                // Yield to ensure we don't monopolize the executor
+                embassy_futures::yield_now().await;
+                return Event::PortEvent(PortEvent::StatusChanged(sw_event));
+            }
+
+            shared_state.sink_ready_timeout
+        };
 
         match select(self.port_event_receiver.wait_next(), async move {
             if let Some(timeout) = timeout {
@@ -116,6 +129,7 @@ impl<'a, State: Lockable<Inner = SharedState>, InterruptReceiver: Receiver<PortE
             Either::Second(_) => {
                 let mut status_event = PortStatusEventBitfield::none();
                 status_event.set_sink_ready(true);
+                self.shared_state.lock().await.sink_ready_timeout = None;
                 Event::PortEvent(PortEvent::StatusChanged(status_event))
             }
         }

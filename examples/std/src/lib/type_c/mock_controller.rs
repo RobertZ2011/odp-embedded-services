@@ -15,6 +15,7 @@ use type_c_interface::port::{
     RetimerFwUpdateState, SendVdm, TbtConfig, TypeCStateMachineState, UsbControlConfig, event::PortEventBitfield,
 };
 use type_c_service::util::power_capability_from_current;
+use type_c_service::wrapper::proxy::state::SharedState;
 
 pub struct ControllerState {
     events: Signal<GlobalRawMutex, PortEventBitfield>,
@@ -321,9 +322,9 @@ impl type_c_interface::port::Controller for Controller<'_> {
     }
 }
 
-pub type Wrapper<'a> = type_c_service::wrapper::ControllerWrapper<
+pub type Port<'a> = type_c_service::wrapper::proxy::PowerProxyDevice<
     'a,
-    GlobalRawMutex,
     Mutex<GlobalRawMutex, Controller<'a>>,
+    Mutex<GlobalRawMutex, SharedState>,
     channel::DynamicSender<'a, power_policy_interface::psu::event::EventData>,
 >;
