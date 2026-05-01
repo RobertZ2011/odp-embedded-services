@@ -33,13 +33,13 @@ use type_c_interface::port::{ControllerId, Device, PortRegistration};
 use type_c_interface::service::event::PortEvent as ServicePortEvent;
 use type_c_service::bridge::Bridge;
 use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
-use type_c_service::driver::tps6699x::{self as tps6699x_drv};
-use type_c_service::service::{EventReceiver as ServiceEventReceiver, Service};
-use type_c_service::wrapper::proxy::PowerProxyDevice;
-use type_c_service::wrapper::proxy::event_receiver::{
+use type_c_service::controller::Port;
+use type_c_service::controller::event_receiver::{
     EventReceiver as PortEventReceiver, InterruptReceiver as _, PortEventSplitter,
 };
-use type_c_service::wrapper::proxy::state::SharedState as PortSharedState;
+use type_c_service::controller::state::SharedState as PortSharedState;
+use type_c_service::driver::tps6699x::{self as tps6699x_drv};
+use type_c_service::service::{EventReceiver as ServiceEventReceiver, Service};
 
 extern crate rt685s_evk_example;
 
@@ -61,7 +61,7 @@ impl cfu_service::customization::Customization for CfuCustomization {
 type PortSharedStateType = Mutex<GlobalRawMutex, PortSharedState>;
 type PortType = Mutex<
     GlobalRawMutex,
-    PowerProxyDevice<
+    Port<
         'static,
         Tps6699xMutex<'static>,
         PortSharedStateType,
@@ -370,7 +370,7 @@ async fn main(spawner: Spawner) {
     let port1_shared_state = PORT1_SHARED_STATE.init(Mutex::new(PortSharedState::new()));
 
     static PORT0: StaticCell<PortType> = StaticCell::new();
-    let port0 = PORT0.init(Mutex::new(PowerProxyDevice::new(
+    let port0 = PORT0.init(Mutex::new(Port::new(
         "PD0",
         Default::default(),
         LocalPortId(0),
@@ -382,7 +382,7 @@ async fn main(spawner: Spawner) {
     )));
 
     static PORT1: StaticCell<PortType> = StaticCell::new();
-    let port1 = PORT1.init(Mutex::new(PowerProxyDevice::new(
+    let port1 = PORT1.init(Mutex::new(Port::new(
         "PD1",
         Default::default(),
         LocalPortId(1),

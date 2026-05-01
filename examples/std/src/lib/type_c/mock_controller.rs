@@ -14,8 +14,8 @@ use type_c_interface::port::{
     AttnVdm, ControllerStatus, DpConfig, DpPinConfig, DpStatus, OtherVdm, PdStateMachineConfig, PortStatus,
     RetimerFwUpdateState, SendVdm, TbtConfig, TypeCStateMachineState, UsbControlConfig, event::PortEventBitfield,
 };
+use type_c_service::controller::state::SharedState;
 use type_c_service::util::power_capability_from_current;
-use type_c_service::wrapper::proxy::state::SharedState;
 
 pub struct ControllerState {
     events: Signal<GlobalRawMutex, PortEventBitfield>,
@@ -120,7 +120,7 @@ pub struct InterruptReceiver<'a> {
     events: &'a Signal<GlobalRawMutex, PortEventBitfield>,
 }
 
-impl<const N: usize> type_c_service::wrapper::proxy::event_receiver::InterruptReceiver<N> for InterruptReceiver<'_> {
+impl<const N: usize> type_c_service::controller::event_receiver::InterruptReceiver<N> for InterruptReceiver<'_> {
     async fn wait_interrupt(&mut self) -> [PortEventBitfield; N] {
         let events = self.events.wait().await;
         let mut result = [PortEventBitfield::none(); N];
@@ -322,7 +322,7 @@ impl type_c_interface::port::Controller for Controller<'_> {
     }
 }
 
-pub type Port<'a> = type_c_service::wrapper::proxy::PowerProxyDevice<
+pub type Port<'a> = type_c_service::controller::Port<
     'a,
     Mutex<GlobalRawMutex, Controller<'a>>,
     Mutex<GlobalRawMutex, SharedState>,
