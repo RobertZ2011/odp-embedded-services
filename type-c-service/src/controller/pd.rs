@@ -7,14 +7,14 @@ use type_c_interface::port::{
 use type_c_interface::service::event::{PortEvent as ServicePortEvent, PortEventData as ServicePortEventData};
 
 use super::*;
-use crate::wrapper::proxy::state::SharedState;
+use crate::controller::state::SharedState;
 
 impl<
     'device,
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> PowerProxyDevice<'device, C, Shared, PowerSender>
+> Port<'device, C, Shared, PowerSender>
 {
     /// Process a VDM event by retrieving the relevant VDM data from the `controller` for the appropriate `port`.
     pub(super) async fn process_vdm_event(

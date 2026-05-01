@@ -1,3 +1,4 @@
+//! Struct that manages per-port state, interfacing with a controller object that exposes multiple ports.
 use embedded_services::{debug, error, event::Sender, info, named::Named, sync::Lockable};
 use embedded_usb_pd::{Error, GlobalPortId, LocalPortId, PdError};
 use power_policy_interface::psu::PsuState;
@@ -8,8 +9,8 @@ use type_c_interface::service::event::{
     PortEvent as ServicePortEvent, PortEventData as ServicePortEventData, StatusChangedData,
 };
 
-use crate::wrapper::proxy::event::Event;
-use crate::wrapper::proxy::state::SharedState;
+use crate::controller::event::Event;
+use crate::controller::state::SharedState;
 
 pub mod config;
 pub mod event;
@@ -18,7 +19,7 @@ mod pd;
 mod power;
 pub mod state;
 
-pub struct PowerProxyDevice<
+pub struct Port<
     'device,
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
@@ -51,8 +52,11 @@ impl<
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> PowerProxyDevice<'device, C, Shared, PowerSender>
+> Port<'device, C, Shared, PowerSender>
 {
+    /// Create new Port instance
+    // Argument count will be reduced as the last bit of refactoring is done
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: &'static str,
         config: config::Config,
@@ -219,7 +223,7 @@ impl<
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> Named for PowerProxyDevice<'device, C, Shared, PowerSender>
+> Named for Port<'device, C, Shared, PowerSender>
 {
     fn name(&self) -> &'static str {
         self.name

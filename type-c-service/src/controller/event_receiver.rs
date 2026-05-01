@@ -8,8 +8,8 @@ use embedded_services::event::{Receiver, Sender};
 use embedded_services::sync::Lockable;
 
 use crate::PortEventStreamer;
-use crate::wrapper::proxy::event::Event;
-use crate::wrapper::proxy::state::SharedState;
+use crate::controller::event::Event;
+use crate::controller::state::SharedState;
 use type_c_interface::port::event::{PortEvent, PortEventBitfield, PortStatusEventBitfield};
 
 /// Trait used for receiving interrupt from the controller.

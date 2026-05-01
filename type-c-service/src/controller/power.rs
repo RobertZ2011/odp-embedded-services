@@ -11,7 +11,7 @@ use power_policy_interface::{
 };
 use type_c_interface::port::Controller;
 
-use crate::{util::power_policy_error_from_pd_bus_error, wrapper::proxy::config::UnconstrainedSink};
+use crate::{controller::config::UnconstrainedSink, util::power_policy_error_from_pd_bus_error};
 
 use super::*;
 
@@ -20,7 +20,7 @@ impl<
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> PowerProxyDevice<'device, C, Shared, PowerSender>
+> Port<'device, C, Shared, PowerSender>
 {
     /// Handle a new contract as consumer
     pub(super) async fn process_new_consumer_contract(
@@ -120,7 +120,7 @@ impl<
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> Psu for PowerProxyDevice<'device, C, Shared, PowerSender>
+> Psu for Port<'device, C, Shared, PowerSender>
 {
     async fn disconnect(&mut self) -> Result<(), PsuError> {
         self.controller

@@ -871,7 +871,7 @@ bitfield! {
     pub u32, ti_fw_version, set_ti_fw_version: 63, 32;
 }
 
-impl<'a, M: RawMutex, BUS: I2c> crate::wrapper::proxy::event_receiver::InterruptReceiver<MAX_SUPPORTED_PORTS>
+impl<'a, M: RawMutex, BUS: I2c> crate::controller::event_receiver::InterruptReceiver<MAX_SUPPORTED_PORTS>
     for interrupt::InterruptReceiver<'a, M, BUS>
 {
     async fn wait_interrupt(&mut self) -> [PortEventBitfield; MAX_SUPPORTED_PORTS] {

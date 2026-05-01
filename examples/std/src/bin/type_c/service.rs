@@ -22,13 +22,12 @@ use type_c_interface::service::event::PortEvent as ServicePortEvent;
 use type_c_interface::service::event::PortEventData as ServicePortEventData;
 use type_c_service::bridge::Bridge;
 use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
+use type_c_service::controller::event_receiver::InterruptReceiver as _;
+use type_c_service::controller::event_receiver::{EventReceiver as PortEventReceiver, PortEventSplitter};
+use type_c_service::controller::state::SharedState;
 use type_c_service::service::config::Config;
 use type_c_service::service::{EventReceiver as ServiceEventReceiver, Service};
 use type_c_service::util::power_capability_from_current;
-use type_c_service::wrapper::proxy::PowerProxyDevice;
-use type_c_service::wrapper::proxy::event_receiver::InterruptReceiver as _;
-use type_c_service::wrapper::proxy::event_receiver::{EventReceiver as PortEventReceiver, PortEventSplitter};
-use type_c_service::wrapper::proxy::state::SharedState;
 
 const CHANNEL_CAPACITY: usize = 4;
 const CONTROLLER0_ID: ControllerId = ControllerId(0);
@@ -148,7 +147,7 @@ async fn task(spawner: Spawner) {
     let port_interrupt_sender = port_interrupt_channel.dyn_sender();
 
     static PORT: StaticCell<PortType> = StaticCell::new();
-    let port = PORT.init(Mutex::new(PowerProxyDevice::new(
+    let port = PORT.init(Mutex::new(Port::new(
         "PD0",
         Default::default(),
         LocalPortId(0),

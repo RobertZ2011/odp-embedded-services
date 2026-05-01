@@ -24,11 +24,10 @@ use type_c_interface::port::event::PortEventBitfield;
 use type_c_interface::service::event::PortEvent as ServicePortEvent;
 use type_c_service::bridge::Bridge;
 use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
+use type_c_service::controller::event_receiver::InterruptReceiver as _;
+use type_c_service::controller::event_receiver::{EventReceiver as PortEventReceiver, PortEventSplitter};
+use type_c_service::controller::state::SharedState;
 use type_c_service::service::{EventReceiver as ServiceEventReceiver, Service};
-use type_c_service::wrapper::proxy::PowerProxyDevice;
-use type_c_service::wrapper::proxy::event_receiver::InterruptReceiver as _;
-use type_c_service::wrapper::proxy::event_receiver::{EventReceiver as PortEventReceiver, PortEventSplitter};
-use type_c_service::wrapper::proxy::state::SharedState;
 
 const CHANNEL_CAPACITY: usize = 4;
 
@@ -143,7 +142,7 @@ async fn task(spawner: Spawner) {
     let port_interrupt_sender_0 = port_interrupt_channel_0.dyn_sender();
 
     static PORT0: StaticCell<PortType> = StaticCell::new();
-    let port0 = PORT0.init(Mutex::new(PowerProxyDevice::new(
+    let port0 = PORT0.init(Mutex::new(Port::new(
         "PD0",
         Default::default(),
         LocalPortId(0),
@@ -188,7 +187,7 @@ async fn task(spawner: Spawner) {
     let port_interrupt_sender_1 = port_interrupt_channel_1.dyn_sender();
 
     static PORT1: StaticCell<PortType> = StaticCell::new();
-    let port1 = PORT1.init(Mutex::new(PowerProxyDevice::new(
+    let port1 = PORT1.init(Mutex::new(Port::new(
         "PD1",
         Default::default(),
         LocalPortId(0),
@@ -233,7 +232,7 @@ async fn task(spawner: Spawner) {
     let port_interrupt_sender_2 = port_interrupt_channel_2.dyn_sender();
 
     static PORT2: StaticCell<PortType> = StaticCell::new();
-    let port2 = PORT2.init(Mutex::new(PowerProxyDevice::new(
+    let port2 = PORT2.init(Mutex::new(Port::new(
         "PD2",
         Default::default(),
         LocalPortId(0),
