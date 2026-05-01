@@ -2,6 +2,7 @@
 use embedded_services::{debug, error, event::Sender, info, named::Named, sync::Lockable};
 use embedded_usb_pd::{Error, GlobalPortId, LocalPortId, PdError};
 use power_policy_interface::psu::PsuState;
+use type_c_interface::port::event::PortEventBitfield;
 use type_c_interface::port::{
     Controller, PortStatus, event::PortEvent as InterfacePortEvent, event::PortStatusEventBitfield,
 };
@@ -9,7 +10,7 @@ use type_c_interface::service::event::{
     PortEvent as ServicePortEvent, PortEventData as ServicePortEventData, StatusChangedData,
 };
 
-use crate::controller::event::Event;
+use crate::controller::event::{Event, Loopback};
 use crate::controller::state::SharedState;
 
 pub mod config;
@@ -24,6 +25,7 @@ pub struct Port<
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
+    LoopbackSender: Sender<event::Loopback>,
 > {
     /// Local port
     port: LocalPortId,
@@ -45,6 +47,8 @@ pub struct Port<
     shared_state: &'device Shared,
     /// Type-C service context
     context: &'device type_c_interface::service::context::Context,
+    /// Loopback sender
+    loopback_sender: LoopbackSender,
 }
 
 impl<
@@ -52,7 +56,8 @@ impl<
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> Port<'device, C, Shared, PowerSender>
+    LoopbackSender: Sender<event::Loopback>,
+> Port<'device, C, Shared, PowerSender, LoopbackSender>
 {
     /// Create new Port instance
     // Argument count will be reduced as the last bit of refactoring is done
@@ -65,6 +70,7 @@ impl<
         controller: &'device C,
         shared_state: &'device Shared,
         power_policy_sender: PowerSender,
+        loopback_sender: LoopbackSender,
         context: &'device type_c_interface::service::context::Context,
     ) -> Self {
         Self {
@@ -78,6 +84,7 @@ impl<
             config,
             shared_state,
             context,
+            loopback_sender,
         }
     }
 
@@ -198,22 +205,24 @@ impl<
     pub async fn sync_state(&mut self) -> Result<(), Error<<C::Inner as Controller>::BusError>> {
         let status = self.controller.lock().await.get_port_status(self.port).await?;
 
-        let mut shared_state = self.shared_state.lock().await;
-        let status_changed = &mut shared_state.sw_status_event;
+        let mut event = PortEventBitfield::none();
         let previous_status = self.status;
 
         if previous_status.is_connected() != status.is_connected() {
-            status_changed.set_plug_inserted_or_removed(true);
+            event.status.set_plug_inserted_or_removed(true);
         }
 
         if previous_status.available_sink_contract != status.available_sink_contract {
-            status_changed.set_new_power_contract_as_consumer(true);
+            event.status.set_new_power_contract_as_consumer(true);
         }
 
         if previous_status.available_source_contract != status.available_source_contract {
-            status_changed.set_new_power_contract_as_provider(true);
+            event.status.set_new_power_contract_as_provider(true);
         }
 
+        if event != PortEventBitfield::none() {
+            self.loopback_sender.send(Loopback::PortEvent(event)).await;
+        }
         Ok(())
     }
 }
@@ -223,7 +232,8 @@ impl<
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> Named for Port<'device, C, Shared, PowerSender>
+    LoopbackSender: Sender<event::Loopback>,
+> Named for Port<'device, C, Shared, PowerSender, LoopbackSender>
 {
     fn name(&self) -> &'static str {
         self.name

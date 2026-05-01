@@ -20,7 +20,8 @@ impl<
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> Port<'device, C, Shared, PowerSender>
+    LoopbackSender: Sender<event::Loopback>,
+> Port<'device, C, Shared, PowerSender, LoopbackSender>
 {
     /// Handle a new contract as consumer
     pub(super) async fn process_new_consumer_contract(
@@ -120,7 +121,8 @@ impl<
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> Psu for Port<'device, C, Shared, PowerSender>
+    LoopbackSender: Sender<event::Loopback>,
+> Psu for Port<'device, C, Shared, PowerSender, LoopbackSender>
 {
     async fn disconnect(&mut self) -> Result<(), PsuError> {
         self.controller

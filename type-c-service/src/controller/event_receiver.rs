@@ -3,12 +3,11 @@ use core::array;
 use core::future::pending;
 use embassy_futures::select::{Either, select};
 use embassy_time::Timer;
-use embedded_services::debug;
 use embedded_services::event::{Receiver, Sender};
 use embedded_services::sync::Lockable;
 
 use crate::PortEventStreamer;
-use crate::controller::event::Event;
+use crate::controller::event::{Event, Loopback};
 use crate::controller::state::SharedState;
 use type_c_interface::port::event::{PortEvent, PortEventBitfield, PortStatusEventBitfield};
 
@@ -41,19 +40,22 @@ impl<const N: usize, S: Sender<PortEventBitfield>> PortEventSplitter<N, S> {
 }
 
 /// Struct to receive and stream port events from the controller.
-pub struct PortEventReceiver<R: Receiver<PortEventBitfield>> {
+pub struct PortEventReceiver<R: Receiver<PortEventBitfield>, LoopbackReceiver: Receiver<Loopback>> {
     /// Receiver for the controller's interrupt events
     receiver: R,
     /// Port event streaming state
     streaming_state: Option<PortEventStreamer<array::IntoIter<PortEventBitfield, 1>>>,
+    /// Loopback receiver for software-generated events
+    loopback_receiver: LoopbackReceiver,
 }
 
-impl<R: Receiver<PortEventBitfield>> PortEventReceiver<R> {
+impl<R: Receiver<PortEventBitfield>, LoopbackReceiver: Receiver<Loopback>> PortEventReceiver<R, LoopbackReceiver> {
     /// Create a new instance
-    pub fn new(receiver: R) -> Self {
+    pub fn new(receiver: R, loopback_receiver: LoopbackReceiver) -> Self {
         Self {
             receiver,
             streaming_state: None,
+            loopback_receiver,
         }
     }
 
@@ -65,7 +67,8 @@ impl<R: Receiver<PortEventBitfield>> PortEventReceiver<R> {
                 embassy_futures::yield_now().await;
                 streaming_state
             } else {
-                let events = self.receiver.wait_next().await;
+                let (Either::First(Loopback::PortEvent(events)) | Either::Second(events)) =
+                    select(self.loopback_receiver.wait_next(), self.receiver.wait_next()).await;
                 self.streaming_state
                     .insert(PortEventStreamer::new([events].into_iter()))
             };
@@ -80,21 +83,34 @@ impl<R: Receiver<PortEventBitfield>> PortEventReceiver<R> {
 }
 
 /// Struct used for containing controller event receivers.
-pub struct EventReceiver<'a, State: Lockable<Inner = SharedState>, InterruptReceiver: Receiver<PortEventBitfield>> {
+pub struct EventReceiver<
+    'a,
+    State: Lockable<Inner = SharedState>,
+    InterruptReceiver: Receiver<PortEventBitfield>,
+    LoopbackReceiver: Receiver<Loopback>,
+> {
     /// Port event receiver
-    port_event_receiver: PortEventReceiver<InterruptReceiver>,
+    port_event_receiver: PortEventReceiver<InterruptReceiver, LoopbackReceiver>,
     /// Shared state
     shared_state: &'a State,
 }
 
-impl<'a, State: Lockable<Inner = SharedState>, InterruptReceiver: Receiver<PortEventBitfield>>
-    EventReceiver<'a, State, InterruptReceiver>
+impl<
+    'a,
+    State: Lockable<Inner = SharedState>,
+    InterruptReceiver: Receiver<PortEventBitfield>,
+    LoopbackReceiver: Receiver<Loopback>,
+> EventReceiver<'a, State, InterruptReceiver, LoopbackReceiver>
 {
     /// Create a new instance
-    pub fn new(shared_state: &'a State, port_event_receiver: InterruptReceiver) -> Self {
+    pub fn new(
+        shared_state: &'a State,
+        port_event_receiver: InterruptReceiver,
+        loopback_receiver: LoopbackReceiver,
+    ) -> Self {
         Self {
             shared_state,
-            port_event_receiver: PortEventReceiver::new(port_event_receiver),
+            port_event_receiver: PortEventReceiver::new(port_event_receiver, loopback_receiver),
         }
     }
 
@@ -102,20 +118,7 @@ impl<'a, State: Lockable<Inner = SharedState>, InterruptReceiver: Receiver<PortE
     ///
     /// Returns the local port ID and the event bitfield.
     pub async fn wait_event(&mut self) -> Event {
-        let timeout = {
-            let mut shared_state = self.shared_state.lock().await;
-            if shared_state.sw_status_event != PortStatusEventBitfield::none() {
-                let sw_event = shared_state.sw_status_event;
-                shared_state.sw_status_event = PortStatusEventBitfield::none();
-                debug!("Processing pending software status event: {:#?}", sw_event);
-                // Yield to ensure we don't monopolize the executor
-                embassy_futures::yield_now().await;
-                return Event::PortEvent(PortEvent::StatusChanged(sw_event));
-            }
-
-            shared_state.sink_ready_timeout
-        };
-
+        let timeout = self.shared_state.lock().await.sink_ready_timeout;
         match select(self.port_event_receiver.wait_next(), async move {
             if let Some(timeout) = timeout {
                 Timer::at(timeout).await;

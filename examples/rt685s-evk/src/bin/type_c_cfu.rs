@@ -66,6 +66,7 @@ type PortType = Mutex<
         Tps6699xMutex<'static>,
         PortSharedStateType,
         DynamicSender<'static, power_policy_interface::psu::event::EventData>,
+        DynamicSender<'static, type_c_service::controller::event::Loopback>,
     >,
 >;
 type ChargerType = power_policy_interface::charger::mock::ChargerType;
@@ -96,8 +97,12 @@ type PowerPolicyServiceType = Mutex<
 >;
 
 type ServiceType = Service<'static>;
-type PortEventReceiverType =
-    PortEventReceiver<'static, PortSharedStateType, DynamicReceiver<'static, PortEventBitfield>>;
+type PortEventReceiverType = PortEventReceiver<
+    'static,
+    PortSharedStateType,
+    DynamicReceiver<'static, PortEventBitfield>,
+    DynamicReceiver<'static, type_c_service::controller::event::Loopback>,
+>;
 type CfuUpdaterSharedStateType = Mutex<GlobalRawMutex, cfu_service::basic::state::SharedState>;
 type CfuUpdaterType<'a> =
     cfu_service::basic::Updater<'a, Tps6699xMutex<'a>, CfuUpdaterSharedStateType, CfuCustomization>;
@@ -119,8 +124,10 @@ async fn bridge_task(
     }
 }
 
-#[embassy_executor::task]
+#[embassy_executor::task(pool_size = 2)]
 async fn port_task(mut event_receiver: PortEventReceiverType, port: &'static PortType) {
+    port.lock().await.sync_state().await.unwrap();
+
     loop {
         let event = event_receiver.wait_event().await;
         let output = port.lock().await.process_event(event).await;
@@ -363,6 +370,18 @@ async fn main(spawner: Spawner) {
     let cfu_client = CfuClient::new(&CFU_CLIENT).await;
     cfu_client.register_device(cfu_device).unwrap();
 
+    static PORT0_LOOPBACK_CHANNEL: StaticCell<Channel<GlobalRawMutex, type_c_service::controller::event::Loopback, 1>> =
+        StaticCell::new();
+    let port0_loopback_channel = PORT0_LOOPBACK_CHANNEL.init(Channel::new());
+    let port0_loopback_sender = port0_loopback_channel.dyn_sender();
+    let port0_loopback_receiver = port0_loopback_channel.dyn_receiver();
+
+    static PORT1_LOOPBACK_CHANNEL: StaticCell<Channel<GlobalRawMutex, type_c_service::controller::event::Loopback, 1>> =
+        StaticCell::new();
+    let port1_loopback_channel = PORT1_LOOPBACK_CHANNEL.init(Channel::new());
+    let port1_loopback_sender = port1_loopback_channel.dyn_sender();
+    let port1_loopback_receiver = port1_loopback_channel.dyn_receiver();
+
     static PORT0_SHARED_STATE: StaticCell<PortSharedStateType> = StaticCell::new();
     let port0_shared_state = PORT0_SHARED_STATE.init(Mutex::new(PortSharedState::new()));
 
@@ -378,6 +397,7 @@ async fn main(spawner: Spawner) {
         controller_mutex,
         port0_shared_state,
         policy_sender0,
+        port0_loopback_sender,
         controller_context,
     )));
 
@@ -390,6 +410,7 @@ async fn main(spawner: Spawner) {
         controller_mutex,
         port1_shared_state,
         policy_sender1,
+        port1_loopback_sender,
         controller_context,
     )));
 
@@ -455,7 +476,7 @@ async fn main(spawner: Spawner) {
     spawner.spawn(bridge_task(bridge_receiver, bridge).expect("Failed to create bridge task"));
     spawner.spawn(
         port_task(
-            PortEventReceiver::new(port0_shared_state, port0_interrupt_receiver),
+            PortEventReceiver::new(port0_shared_state, port0_interrupt_receiver, port0_loopback_receiver),
             port0,
         )
         .expect("Failed to create controller0 task"),
@@ -463,7 +484,7 @@ async fn main(spawner: Spawner) {
 
     spawner.spawn(
         port_task(
-            PortEventReceiver::new(port1_shared_state, port1_interrupt_receiver),
+            PortEventReceiver::new(port1_shared_state, port1_interrupt_receiver, port1_loopback_receiver),
             port1,
         )
         .expect("Failed to create controller1 task"),

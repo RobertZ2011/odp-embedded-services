@@ -1,13 +1,10 @@
 use embassy_time::Instant;
-use type_c_interface::port::event::PortStatusEventBitfield;
 
 /// State shared between the port and event receiver
 #[derive(Copy, Clone)]
 pub struct SharedState {
     /// Sink ready timeout
     pub(crate) sink_ready_timeout: Option<Instant>,
-    /// Pending software status event
-    pub(crate) sw_status_event: PortStatusEventBitfield,
 }
 
 impl SharedState {
@@ -15,7 +12,6 @@ impl SharedState {
     pub fn new() -> Self {
         Self {
             sink_ready_timeout: None,
-            sw_status_event: PortStatusEventBitfield::none(),
         }
     }
 }

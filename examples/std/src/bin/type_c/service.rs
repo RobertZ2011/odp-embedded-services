@@ -58,7 +58,12 @@ type PowerPolicyServiceType = Mutex<
 
 type ServiceType = Service<'static>;
 type SharedStateType = Mutex<GlobalRawMutex, SharedState>;
-type PortEventReceiverType = PortEventReceiver<'static, SharedStateType, DynamicReceiver<'static, PortEventBitfield>>;
+type PortEventReceiverType = PortEventReceiver<
+    'static,
+    SharedStateType,
+    DynamicReceiver<'static, PortEventBitfield>,
+    DynamicReceiver<'static, type_c_service::controller::event::Loopback>,
+>;
 
 #[embassy_executor::task]
 async fn port_task(mut event_receiver: PortEventReceiverType, port: &'static PortType) {
@@ -137,6 +142,12 @@ async fn task(spawner: Spawner) {
     let bridge_receiver = BridgeEventReceiver::new(pd_registration);
     let bridge = Bridge::new(controller, pd_registration);
 
+    static PORT_LOOPBACK_CHANNEL: StaticCell<Channel<GlobalRawMutex, type_c_service::controller::event::Loopback, 1>> =
+        StaticCell::new();
+    let port_loopback_channel = PORT_LOOPBACK_CHANNEL.init(Channel::new());
+    let port_loopback_sender = port_loopback_channel.dyn_sender();
+    let port_loopback_receiver = port_loopback_channel.dyn_receiver();
+
     static PORT_SHARED_STATE: StaticCell<SharedStateType> = StaticCell::new();
     let port_shared_state = PORT_SHARED_STATE.init(Mutex::new(SharedState::new()));
 
@@ -155,6 +166,7 @@ async fn task(spawner: Spawner) {
         controller,
         port_shared_state,
         policy_sender,
+        port_loopback_sender,
         controller_context,
     )));
 
@@ -200,8 +212,11 @@ async fn task(spawner: Spawner) {
 
     spawner.spawn(bridge_task(bridge_receiver, bridge).expect("Failed to create bridge task"));
     spawner.spawn(
-        port_task(PortEventReceiver::new(port_shared_state, port_interrupt_receiver), port)
-            .expect("Failed to create controller task"),
+        port_task(
+            PortEventReceiver::new(port_shared_state, port_interrupt_receiver, port_loopback_receiver),
+            port,
+        )
+        .expect("Failed to create controller task"),
     );
 
     spawner.spawn(

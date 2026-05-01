@@ -14,7 +14,8 @@ impl<
     C: Lockable<Inner: Controller>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> Port<'device, C, Shared, PowerSender>
+    LoopbackSender: Sender<event::Loopback>,
+> Port<'device, C, Shared, PowerSender, LoopbackSender>
 {
     /// Process a VDM event by retrieving the relevant VDM data from the `controller` for the appropriate `port`.
     pub(super) async fn process_vdm_event(
