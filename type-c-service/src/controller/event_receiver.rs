@@ -108,6 +108,7 @@ impl<'a, State: Lockable<Inner = SharedState>, InterruptReceiver: Receiver<PortE
                 let sw_event = shared_state.sw_status_event;
                 shared_state.sw_status_event = PortStatusEventBitfield::none();
                 debug!("Processing pending software status event: {:#?}", sw_event);
+                drop(shared_state);
                 // Yield to ensure we don't monopolize the executor
                 embassy_futures::yield_now().await;
                 return Event::PortEvent(PortEvent::StatusChanged(sw_event));
