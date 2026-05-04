@@ -833,7 +833,7 @@ impl<M: RawMutex, B: I2c> type_c_interface::controller::type_c::StateMachine for
     }
 }
 
-impl<M: RawMutex, B: I2c> type_c_interface::controller::ucsi::Lpm for Tps6699x<'_, M, B> {
+impl<M: RawMutex, B: I2c> type_c_interface::ucsi::Lpm for Tps6699x<'_, M, B> {
     async fn execute_lpm_command(&mut self, command: lpm::LocalCommand) -> Result<Option<lpm::ResponseData>, PdError> {
         self.guard_no_fw_update_active()?;
         self.tps6699x

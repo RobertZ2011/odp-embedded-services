@@ -13,8 +13,6 @@ pub mod pd;
 pub mod power;
 pub mod retimer;
 pub mod type_c;
-pub mod ucsi;
-
 use crate::control::dp::{DpConfig, DpStatus};
 use crate::control::pd::PdStateMachineConfig;
 use crate::control::retimer::RetimerFwUpdateState;

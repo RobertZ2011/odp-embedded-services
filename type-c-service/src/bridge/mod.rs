@@ -7,9 +7,9 @@ use type_c_interface::controller::{
     pd::{Pd, StateMachine as PdStateMachine},
     retimer::Retimer,
     type_c::StateMachine as TypeCStateMachine,
-    ucsi::Lpm as UcsiLpm,
 };
 use type_c_interface::port::{self, InternalResponseData, Response};
+use type_c_interface::ucsi::Lpm as UcsiLpm;
 
 use crate::bridge::event_receiver::{ControllerCommand, OutputControllerCommand};
 pub mod event_receiver;

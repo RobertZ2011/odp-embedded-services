@@ -9,7 +9,6 @@ pub mod pd;
 pub mod power;
 pub mod retimer;
 pub mod type_c;
-pub mod ucsi;
 
 /// Controller status
 #[derive(Copy, Clone, Debug)]
