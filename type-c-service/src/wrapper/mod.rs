@@ -41,12 +41,6 @@ mod vdm;
 use type_c_interface::port::event::PortStatusEventBitfield;
 use type_c_interface::port::{Controller, PortStatus};
 
-/// Base interval for checking for FW update timeouts and recovery attempts
-pub const DEFAULT_FW_UPDATE_TICK_INTERVAL_MS: u64 = 5000;
-/// Default number of ticks before we consider a firmware update to have timed out
-/// 300 seconds at 5 seconds per tick
-pub const DEFAULT_FW_UPDATE_TIMEOUT_TICKS: u8 = 60;
-
 /// Maximum number of supported ports
 pub const MAX_SUPPORTED_PORTS: usize = 2;
 
