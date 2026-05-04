@@ -13,12 +13,17 @@ use crate::controller::event::{Event, Loopback};
 use crate::controller::state::SharedState;
 
 pub mod config;
+pub mod electrical_disconnect;
 pub mod event;
 pub mod event_receiver;
 pub mod macros;
+pub mod max_sink_voltage;
 mod pd;
 mod power;
+pub mod retimer;
 pub mod state;
+pub mod type_c;
+pub mod ucsi;
 
 pub struct Port<
     'device,
