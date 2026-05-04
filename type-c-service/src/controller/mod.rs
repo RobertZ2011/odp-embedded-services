@@ -1,6 +1,6 @@
 //! Struct that manages per-port state, interfacing with a controller object that exposes multiple ports.
 use embedded_services::{debug, error, event::Sender, info, named::Named, sync::Lockable};
-use embedded_usb_pd::{Error, GlobalPortId, LocalPortId, PdError};
+use embedded_usb_pd::{GlobalPortId, LocalPortId, PdError};
 use power_policy_interface::psu::PsuState;
 use type_c_interface::control::pd::PortStatus;
 use type_c_interface::controller::Controller;
@@ -89,20 +89,14 @@ impl<
     }
 
     /// Top-level processing function
-    pub async fn process_event(
-        &mut self,
-        event: Event,
-    ) -> Result<Option<ServicePortEventData>, Error<<C::Inner as Controller>::BusError>> {
+    pub async fn process_event(&mut self, event: Event) -> Result<Option<ServicePortEventData>, PdError> {
         match event {
             Event::PortEvent(port_event) => self.process_port_event(port_event).await,
         }
     }
 
     /// Process a port notification
-    async fn process_port_event(
-        &mut self,
-        event: InterfacePortEvent,
-    ) -> Result<Option<ServicePortEventData>, Error<<C::Inner as Controller>::BusError>> {
+    async fn process_port_event(&mut self, event: InterfacePortEvent) -> Result<Option<ServicePortEventData>, PdError> {
         match event {
             InterfacePortEvent::StatusChanged(status_event) => {
                 self.process_port_status_changed(status_event).await.map(Some)
@@ -122,7 +116,7 @@ impl<
     async fn process_port_status_changed(
         &mut self,
         status_event: PortStatusEventBitfield,
-    ) -> Result<ServicePortEventData, Error<<C::Inner as Controller>::BusError>> {
+    ) -> Result<ServicePortEventData, PdError> {
         let new_status = self.controller.lock().await.get_port_status(self.port).await?;
         debug!("({}) status: {:#?}", self.name, new_status);
         debug!("({}) status events: {:#?}", self.name, status_event);
@@ -159,15 +153,12 @@ impl<
                 event,
             })
             .await
-            .map_err(Error::Pd)?;
+            .map_err(|_| PdError::Failed)?;
         Ok(event)
     }
 
     /// Handle a plug event
-    async fn process_plug_event(
-        &mut self,
-        new_status: &PortStatus,
-    ) -> Result<(), Error<<C::Inner as Controller>::BusError>> {
+    async fn process_plug_event(&mut self, new_status: &PortStatus) -> Result<(), PdError> {
         info!("Plug event");
         if new_status.is_connected() {
             info!("Plug inserted");
@@ -179,7 +170,7 @@ impl<
             if let Err(e) = self.psu_state.attach() {
                 // This should never happen because we should have detached above
                 error!("Failed to attach PSU: {:?}", e);
-                return Err(Error::Pd(PdError::Failed));
+                return Err(PdError::Failed);
             }
 
             self.power_policy_sender
@@ -202,7 +193,7 @@ impl<
     }
 
     /// Synchronize the state between the controller and the internal state
-    pub async fn sync_state(&mut self) -> Result<(), Error<<C::Inner as Controller>::BusError>> {
+    pub async fn sync_state(&mut self) -> Result<(), PdError> {
         let status = self.controller.lock().await.get_port_status(self.port).await?;
 
         let mut event = PortEventBitfield::none();

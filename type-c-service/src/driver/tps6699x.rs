@@ -40,8 +40,9 @@ use type_c_interface::control::vdm::{ATTN_VDM_LEN, AttnVdm, OtherVdm, SendVdm};
 use type_c_interface::controller::{Controller, ControllerStatus};
 use type_c_interface::port::event::PortEventBitfield;
 
-use crate::util::power_capability_try_from_contract;
-use crate::util::{basic_fw_update_error_from_pd_bus_error, power_capability_from_current};
+use crate::util::{
+    basic_fw_update_error_from_pd_error, power_capability_from_current, power_capability_try_from_contract,
+};
 
 type Updater<'a, M, B> = BorrowedUpdaterInProgress<tps6699x_drv::Tps6699x<'a, M, B>>;
 
@@ -118,18 +119,23 @@ impl<'a, M: RawMutex, B: I2c> Tps6699x<'a, M, B> {
         }
     }
 
-    fn log_error(&self, e: Error<B::Error>) -> Error<B::Error> {
+    fn log_error(&self, e: Error<B::Error>) -> PdError {
         match e {
-            Error::Bus(_) => error!("({}): Bus error", self.name()),
-            Error::Pd(pd_error) => error!("({}): PD error: {:#?}", self.name(), pd_error),
+            Error::Bus(_) => {
+                error!("({}): Bus error", self.name());
+                PdError::Failed
+            }
+            Error::Pd(pd_error) => {
+                error!("({}): PD error: {:#?}", self.name(), pd_error);
+                pd_error
+            }
         }
-        e
     }
 
     /// Returns a busy error if a FW update is currently in progress
-    fn guard_no_fw_update_active(&self) -> Result<(), Error<B::Error>> {
+    fn guard_no_fw_update_active(&self) -> Result<(), PdError> {
         if self.update_state.is_some() {
-            Err(Error::Pd(PdError::Busy))
+            Err(PdError::Busy)
         } else {
             Ok(())
         }
@@ -225,7 +231,7 @@ impl<'a, M: RawMutex, B: I2c> BasicFwUpdate for Tps6699x<'a, M, B> {
             self.tps6699x
                 .get_customer_use()
                 .await
-                .map_err(|e| basic_fw_update_error_from_pd_bus_error(self.log_error(e)))?,
+                .map_err(|e| basic_fw_update_error_from_pd_error(self.log_error(e)))?,
         );
         Ok(customer_use.custom_fw_version())
     }
@@ -248,17 +254,17 @@ impl<'a, M: RawMutex, B: I2c> BasicFwUpdate for Tps6699x<'a, M, B> {
         // Disable all interrupts on both ports, use guards[1] to ensure that this set of guards is dropped last
         disable_all_interrupts::<tps6699x_drv::Tps6699x<'_, M, B>>(&mut [&mut self.tps6699x], &mut guards[1..])
             .await
-            .map_err(|e| basic_fw_update_error_from_pd_bus_error(self.log_error(e)))?;
+            .map_err(|e| basic_fw_update_error_from_pd_error(self.log_error(e)))?;
         let in_progress = updater
             .start_fw_update(&mut [&mut self.tps6699x], &mut delay)
             .await
-            .map_err(|e| basic_fw_update_error_from_pd_bus_error(self.log_error(e)))?;
+            .map_err(|e| basic_fw_update_error_from_pd_error(self.log_error(e)))?;
 
         // Re-enable interrupts on port 0 only
         if let Err(e) =
             enable_port0_interrupts::<tps6699x_drv::Tps6699x<'_, M, B>>(&mut [&mut self.tps6699x], &mut guards[0..1])
                 .await
-                .map_err(|e| basic_fw_update_error_from_pd_bus_error(self.log_error(e)))
+                .map_err(|e| basic_fw_update_error_from_pd_error(self.log_error(e)))
         {
             error!("Failed to enable port 0 interrupts, aborting update: {:#?}", e);
             in_progress.abort_fw_update(&mut [&mut self.tps6699x], &mut delay).await;
@@ -281,7 +287,7 @@ impl<'a, M: RawMutex, B: I2c> BasicFwUpdate for Tps6699x<'a, M, B> {
             .tps6699x
             .get_mode()
             .await
-            .map_err(|e| basic_fw_update_error_from_pd_bus_error(self.log_error(e)))?
+            .map_err(|e| basic_fw_update_error_from_pd_error(self.log_error(e)))?
             == tps6699x::Mode::F211
         {
             let mut delay = Delay;
@@ -298,7 +304,7 @@ impl<'a, M: RawMutex, B: I2c> BasicFwUpdate for Tps6699x<'a, M, B> {
                 self.tps6699x
                     .fw_update_mode_exit(&mut delay)
                     .await
-                    .map_err(|e| basic_fw_update_error_from_pd_bus_error(self.log_error(e)))
+                    .map_err(|e| basic_fw_update_error_from_pd_error(self.log_error(e)))
             }
         } else {
             // Not in FW update mode, don't need to do anything
@@ -316,7 +322,7 @@ impl<'a, M: RawMutex, B: I2c> BasicFwUpdate for Tps6699x<'a, M, B> {
                 .updater
                 .complete_fw_update(&mut [&mut self.tps6699x], &mut delay)
                 .await
-                .map_err(|e| basic_fw_update_error_from_pd_bus_error(self.log_error(e)))
+                .map_err(|e| basic_fw_update_error_from_pd_error(self.log_error(e)))
         } else {
             Err(BasicFwUpdateError::NeedsActiveUpdate)
         }
@@ -329,7 +335,7 @@ impl<'a, M: RawMutex, B: I2c> BasicFwUpdate for Tps6699x<'a, M, B> {
                 .updater
                 .write_bytes(&mut [&mut self.tps6699x], &mut delay, data)
                 .await
-                .map_err(|e| basic_fw_update_error_from_pd_bus_error(self.log_error(e)))?;
+                .map_err(|e| basic_fw_update_error_from_pd_error(self.log_error(e)))?;
             Ok(())
         } else {
             Err(BasicFwUpdateError::NeedsActiveUpdate)
@@ -338,27 +344,33 @@ impl<'a, M: RawMutex, B: I2c> BasicFwUpdate for Tps6699x<'a, M, B> {
 }
 
 impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
-    type BusError = B::Error;
-
     /// Controller reset
-    async fn reset_controller(&mut self) -> Result<(), Error<Self::BusError>> {
+    async fn reset_controller(&mut self) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         let mut delay = Delay;
-        self.tps6699x.reset(&mut delay).await?;
+        self.tps6699x.reset(&mut delay).await.map_err(|e| self.log_error(e))?;
 
         Ok(())
     }
 
     /// Returns the current status of the port
-    async fn get_port_status(&mut self, port: LocalPortId) -> Result<PortStatus, Error<Self::BusError>> {
+    async fn get_port_status(&mut self, port: LocalPortId) -> Result<PortStatus, PdError> {
         self.guard_no_fw_update_active()?;
-        let status = self.tps6699x.get_port_status(port).await?;
+        let status = self
+            .tps6699x
+            .get_port_status(port)
+            .await
+            .map_err(|e| self.log_error(e))?;
         debug!("Port{} status: {:#?}", port.0, status);
 
-        let pd_status = self.tps6699x.get_pd_status(port).await?;
+        let pd_status = self.tps6699x.get_pd_status(port).await.map_err(|e| self.log_error(e))?;
         debug!("Port{} PD status: {:#?}", port.0, pd_status);
 
-        let port_control = self.tps6699x.get_port_control(port).await?;
+        let port_control = self
+            .tps6699x
+            .get_port_control(port)
+            .await
+            .map_err(|e| self.log_error(e))?;
         debug!("Port{} control: {:#?}", port.0, port_control);
 
         let mut port_status = PortStatus::default();
@@ -371,16 +383,26 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
 
         if port_status.is_connected() {
             // Determine current contract if any
-            let pdo_raw = self.tps6699x.get_active_pdo_contract(port).await?.active_pdo();
+            let pdo_raw = self
+                .tps6699x
+                .get_active_pdo_contract(port)
+                .await
+                .map_err(|e| self.log_error(e))?
+                .active_pdo();
             trace!("Raw PDO: {:#X}", pdo_raw);
-            let rdo_raw = self.tps6699x.get_active_rdo_contract(port).await?.active_rdo();
+            let rdo_raw = self
+                .tps6699x
+                .get_active_rdo_contract(port)
+                .await
+                .map_err(|e| self.log_error(e))?
+                .active_rdo();
             trace!("Raw RDO: {:#X}", rdo_raw);
 
             if pdo_raw != 0 && rdo_raw != 0 {
                 // Got a valid explicit contract
                 if pd_status.is_source() {
-                    let pdo = source::Pdo::try_from(pdo_raw).map_err(|_| Error::from(PdError::InvalidParams))?;
-                    let rdo = Rdo::for_pdo(rdo_raw, pdo).ok_or(Error::Pd(PdError::InvalidParams))?;
+                    let pdo = source::Pdo::try_from(pdo_raw)?;
+                    let rdo = Rdo::for_pdo(rdo_raw, pdo).ok_or(PdError::InvalidParams)?;
                     debug!("PDO: {:#?}", pdo);
                     debug!("RDO: {:#?}", rdo);
                     port_status.available_source_contract =
@@ -390,21 +412,23 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
                     // active_rdo_contract doesn't contain the full picture
                     let mut source_pdos: [source::Pdo; 1] = [source::Pdo::default()];
                     // Read 5V fixed supply source PDO, guaranteed to be present as the first SPR PDO
-                    let (num_sprs, _) = self
-                        .tps6699x
-                        .lock_inner()
-                        .await
-                        .get_rx_src_caps(port, &mut source_pdos[..], &mut [])
-                        .await?;
+                    let (num_sprs, _) = {
+                        self.tps6699x
+                            .lock_inner()
+                            .await
+                            .get_rx_src_caps(port, &mut source_pdos[..], &mut [])
+                            .await
+                    }
+                    .map_err(|e| self.log_error(e.into()))?;
 
                     if num_sprs == 0 {
                         // USB PD spec requires at least one source PDO be present, something is really wrong
                         error!("Port{} no source PDOs found", port.0);
-                        return Err(PdError::InvalidParams.into());
+                        return Err(PdError::InvalidParams);
                     }
 
-                    let pdo = sink::Pdo::try_from(pdo_raw).map_err(|_| Error::from(PdError::InvalidParams))?;
-                    let rdo = Rdo::for_pdo(rdo_raw, pdo).ok_or(Error::Pd(PdError::InvalidParams))?;
+                    let pdo = sink::Pdo::try_from(pdo_raw)?;
+                    let rdo = Rdo::for_pdo(rdo_raw, pdo).ok_or(PdError::InvalidParams)?;
                     debug!("PDO: {:#?}", pdo);
                     debug!("RDO: {:#?}", rdo);
                     port_status.available_sink_contract =
@@ -415,7 +439,7 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
             } else if status.port_role() {
                 // port_role is true for source
                 // Implicit source contract
-                let current = TypecCurrent::try_from(port_control.typec_current()).map_err(Error::Pd)?;
+                let current = TypecCurrent::try_from(port_control.typec_current())?;
                 debug!("Port{} type-C source current: {:#?}", port.0, current);
                 port_status.available_source_contract = Some(power_capability_from_current(current));
             } else {
@@ -426,7 +450,7 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
                     debug!("Port{} no pull up", port.0);
                     None
                 } else {
-                    let current = TypecCurrent::try_from(pd_status.cc_pull_up()).map_err(Error::Pd)?;
+                    let current = TypecCurrent::try_from(pd_status.cc_pull_up())?;
                     debug!("Port{} type-C sink current: {:#?}", port.0, current);
                     Some(power_capability_from_current(current))
                 };
@@ -450,12 +474,20 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
             };
 
             // Update alt-mode status
-            let alt_mode = self.tps6699x.get_alt_mode_status(port).await?;
+            let alt_mode = self
+                .tps6699x
+                .get_alt_mode_status(port)
+                .await
+                .map_err(|e| self.log_error(e))?;
             debug!("Port{} alt mode: {:#?}", port.0, alt_mode);
             port_status.alt_mode = alt_mode;
 
             // Update power path status
-            let power_path = self.tps6699x.get_power_path_status(port).await?;
+            let power_path = self
+                .tps6699x
+                .get_power_path_status(port)
+                .await
+                .map_err(|e| self.log_error(e))?;
             trace!("Port{} power source: {:#?}", port.0, power_path);
             port_status.power_path = match port {
                 PORT0 => PowerPathStatus::new(
@@ -474,34 +506,40 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
         Ok(port_status)
     }
 
-    async fn get_rt_fw_update_status(
-        &mut self,
-        port: LocalPortId,
-    ) -> Result<RetimerFwUpdateState, Error<Self::BusError>> {
+    async fn get_rt_fw_update_status(&mut self, port: LocalPortId) -> Result<RetimerFwUpdateState, PdError> {
         self.guard_no_fw_update_active()?;
         match self.tps6699x.get_rt_fw_update_status(port).await {
             Ok(true) => Ok(RetimerFwUpdateState::Active),
             Ok(false) => Ok(RetimerFwUpdateState::Inactive),
-            Err(e) => Err(e),
+            Err(e) => Err(self.log_error(e)),
         }
     }
 
-    async fn set_rt_fw_update_state(&mut self, port: LocalPortId) -> Result<(), Error<Self::BusError>> {
+    async fn set_rt_fw_update_state(&mut self, port: LocalPortId) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
-        self.tps6699x.set_rt_fw_update_state(port).await
+        self.tps6699x
+            .set_rt_fw_update_state(port)
+            .await
+            .map_err(|e| self.log_error(e))
     }
 
-    async fn clear_rt_fw_update_state(&mut self, port: LocalPortId) -> Result<(), Error<Self::BusError>> {
+    async fn clear_rt_fw_update_state(&mut self, port: LocalPortId) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
-        self.tps6699x.clear_rt_fw_update_state(port).await
+        self.tps6699x
+            .clear_rt_fw_update_state(port)
+            .await
+            .map_err(|e| self.log_error(e))
     }
 
-    async fn set_rt_compliance(&mut self, port: LocalPortId) -> Result<(), Error<Self::BusError>> {
+    async fn set_rt_compliance(&mut self, port: LocalPortId) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
-        self.tps6699x.set_rt_compliance(port).await
+        self.tps6699x
+            .set_rt_compliance(port)
+            .await
+            .map_err(|e| self.log_error(e))
     }
 
-    async fn reconfigure_retimer(&mut self, port: LocalPortId) -> Result<(), Error<Self::BusError>> {
+    async fn reconfigure_retimer(&mut self, port: LocalPortId) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         let input = {
             let mut input = tps6699x::command::muxr::Input(0);
@@ -509,44 +547,55 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
             input
         };
 
-        match self.tps6699x.execute_muxr(port, input).await? {
+        match self
+            .tps6699x
+            .execute_muxr(port, input)
+            .await
+            .map_err(|e| self.log_error(e))?
+        {
             ReturnValue::Success => Ok(()),
             r => {
-                debug!("Error executing MuxR on port {}: {:#?}", port.0, r);
-                Err(Error::Pd(PdError::InvalidResponse))
+                error!("Error executing MuxR on port {}: {:#?}", port.0, r);
+                Err(PdError::InvalidResponse)
             }
         }
     }
 
-    async fn clear_dead_battery_flag(&mut self, port: LocalPortId) -> Result<(), Error<Self::BusError>> {
+    async fn clear_dead_battery_flag(&mut self, port: LocalPortId) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
-        match self.tps6699x.execute_dbfg(port).await? {
+        match self.tps6699x.execute_dbfg(port).await.map_err(|e| self.log_error(e))? {
             ReturnValue::Success => Ok(()),
             r => {
-                debug!("Error executing DBfg on port {}: {:#?}", port.0, r);
-                Err(Error::Pd(PdError::InvalidResponse))
+                error!("Error executing DBfg on port {}: {:#?}", port.0, r);
+                Err(PdError::InvalidResponse)
             }
         }
     }
 
-    async fn enable_sink_path(&mut self, port: LocalPortId, enable: bool) -> Result<(), Error<Self::BusError>> {
+    async fn enable_sink_path(&mut self, port: LocalPortId, enable: bool) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         debug!("Port{} enable sink path: {}", port.0, enable);
-        self.tps6699x.enable_sink_path(port, enable).await
+        self.tps6699x
+            .enable_sink_path(port, enable)
+            .await
+            .map_err(|e| self.log_error(e))
     }
 
-    async fn get_pd_alert(&mut self, port: LocalPortId) -> Result<Option<Ado>, Error<Self::BusError>> {
+    async fn get_pd_alert(&mut self, port: LocalPortId) -> Result<Option<Ado>, PdError> {
         self.guard_no_fw_update_active()?;
-        self.tps6699x.get_rx_ado(port).await.map_err(Error::from)
+        self.tps6699x
+            .get_rx_ado(port)
+            .await
+            .map_err(|e| self.log_error(e.into()))
     }
 
-    async fn get_controller_status(&mut self) -> Result<ControllerStatus<'static>, Error<Self::BusError>> {
+    async fn get_controller_status(&mut self) -> Result<ControllerStatus<'static>, PdError> {
         self.guard_no_fw_update_active()?;
-        let boot_flags = self.tps6699x.get_boot_flags().await?;
-        let customer_use = CustomerUse(self.tps6699x.get_customer_use().await?);
+        let boot_flags = self.tps6699x.get_boot_flags().await.map_err(|e| self.log_error(e))?;
+        let customer_use = CustomerUse(self.tps6699x.get_customer_use().await.map_err(|e| self.log_error(e))?);
 
         Ok(ControllerStatus {
-            mode: self.tps6699x.get_mode().await?.into(),
+            mode: self.tps6699x.get_mode().await.map_err(|e| self.log_error(e))?.into(),
             valid_fw_bank: (boot_flags.active_bank() == 0 && boot_flags.bank0_valid() != 0)
                 || (boot_flags.active_bank() == 1 && boot_flags.bank1_valid() != 0),
             fw_version0: customer_use.ti_fw_version(),
@@ -554,33 +603,31 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
         })
     }
 
-    async fn set_unconstrained_power(
-        &mut self,
-        port: LocalPortId,
-        unconstrained: bool,
-    ) -> Result<(), Error<Self::BusError>> {
+    async fn set_unconstrained_power(&mut self, port: LocalPortId, unconstrained: bool) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
-        self.tps6699x.set_unconstrained_power(port, unconstrained).await
+        self.tps6699x
+            .set_unconstrained_power(port, unconstrained)
+            .await
+            .map_err(|e| self.log_error(e))
     }
 
-    async fn set_max_sink_voltage(
-        &mut self,
-        port: LocalPortId,
-        voltage_mv: Option<u16>,
-    ) -> Result<(), Error<Self::BusError>> {
+    async fn set_max_sink_voltage(&mut self, port: LocalPortId, voltage_mv: Option<u16>) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
-        self.tps6699x.set_autonegotiate_sink_max_voltage(port, voltage_mv).await
+        self.tps6699x
+            .set_autonegotiate_sink_max_voltage(port, voltage_mv)
+            .await
+            .map_err(|e| self.log_error(e))
     }
 
-    async fn get_other_vdm(&mut self, port: LocalPortId) -> Result<OtherVdm, Error<Self::BusError>> {
+    async fn get_other_vdm(&mut self, port: LocalPortId) -> Result<OtherVdm, PdError> {
         self.guard_no_fw_update_active()?;
         match self.tps6699x.get_rx_other_vdm(port).await {
             Ok(vdm) => Ok((*vdm.as_bytes()).into()),
-            Err(e) => Err(e),
+            Err(e) => Err(self.log_error(e)),
         }
     }
 
-    async fn get_attn_vdm(&mut self, port: LocalPortId) -> Result<AttnVdm, Error<Self::BusError>> {
+    async fn get_attn_vdm(&mut self, port: LocalPortId) -> Result<AttnVdm, PdError> {
         self.guard_no_fw_update_active()?;
         match self.tps6699x.get_rx_attn_vdm(port).await {
             Ok(vdm) => {
@@ -588,11 +635,11 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
                 let attn_vdm: AttnVdm = buf.into();
                 Ok(attn_vdm)
             }
-            Err(e) => Err(e),
+            Err(e) => Err(self.log_error(e)),
         }
     }
 
-    async fn send_vdm(&mut self, port: LocalPortId, tx_vdm: SendVdm) -> Result<(), Error<Self::BusError>> {
+    async fn send_vdm(&mut self, port: LocalPortId, tx_vdm: SendVdm) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         let input = {
             let mut input = tps6699x::command::vdms::Input::default();
@@ -613,21 +660,22 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
             input
         };
 
-        match self.tps6699x.send_vdms(port, input).await? {
+        match self
+            .tps6699x
+            .send_vdms(port, input)
+            .await
+            .map_err(|e| self.log_error(e))?
+        {
             ReturnValue::Success => Ok(()),
             r => {
-                debug!("Error executing VDMs on port {}: {:#?}", port.0, r);
-                Err(Error::Pd(PdError::InvalidResponse))
+                error!("Error executing VDMs on port {}: {:#?}", port.0, r);
+                Err(PdError::InvalidResponse)
             }
         }
     }
 
     /// Set USB control configuration for the given port
-    async fn set_usb_control(
-        &mut self,
-        port: LocalPortId,
-        config: UsbControlConfig,
-    ) -> Result<(), Error<Self::BusError>> {
+    async fn set_usb_control(&mut self, port: LocalPortId, config: UsbControlConfig) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         match self.config.usb_control_method {
             UsbControlMethod::TxIdentity => {
@@ -641,7 +689,8 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
                         identity.set_dfp1_vdo(dfp_vdo.0);
                         identity.clone()
                     })
-                    .await?;
+                    .await
+                    .map_err(|e| self.log_error(e))?;
             }
             UsbControlMethod::DpConfig => {
                 use tps6699x::registers::DpUsbDataPath;
@@ -656,7 +705,8 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
                         dp_config.set_usb_data_path(usb_data_path);
                         *dp_config
                     })
-                    .await?;
+                    .await
+                    .map_err(|e| self.log_error(e))?;
             }
             UsbControlMethod::TbtConfig => {
                 use tps6699x::registers::TbtUsbDataPath;
@@ -666,23 +716,26 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
                     TbtUsbDataPath::NotRequired
                 };
 
-                self.tps6699x
-                    .lock_inner()
-                    .await
-                    .modify_tbt_config(port, |tbt_config| {
-                        tbt_config.set_usb_data_path(usb_data_path);
-                        *tbt_config
-                    })
-                    .await?;
+                {
+                    self.tps6699x
+                        .lock_inner()
+                        .await
+                        .modify_tbt_config(port, |tbt_config| {
+                            tbt_config.set_usb_data_path(usb_data_path);
+                            *tbt_config
+                        })
+                        .await
+                }
+                .map_err(|e| self.log_error(e))?;
             }
         }
 
         Ok(())
     }
 
-    async fn get_dp_status(&mut self, port: LocalPortId) -> Result<DpStatus, Error<Self::BusError>> {
+    async fn get_dp_status(&mut self, port: LocalPortId) -> Result<DpStatus, PdError> {
         self.guard_no_fw_update_active()?;
-        let dp_status = self.tps6699x.get_dp_status(port).await?;
+        let dp_status = self.tps6699x.get_dp_status(port).await.map_err(|e| self.log_error(e))?;
         debug!("Port{} DP status: {:#?}", port.0, dp_status);
 
         let alt_mode_entered = dp_status.dp_mode_active() != 0;
@@ -697,11 +750,11 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
         })
     }
 
-    async fn set_dp_config(&mut self, port: LocalPortId, config: DpConfig) -> Result<(), Error<Self::BusError>> {
+    async fn set_dp_config(&mut self, port: LocalPortId, config: DpConfig) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         debug!("Port{} setting DP config: {:#?}", port.0, config);
 
-        let mut dp_config_reg = self.tps6699x.get_dp_config(port).await?;
+        let mut dp_config_reg = self.tps6699x.get_dp_config(port).await.map_err(|e| self.log_error(e))?;
 
         debug!("Current DP config: {:#?}", dp_config_reg);
 
@@ -709,57 +762,63 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
         let cfg_raw: PdDpPinConfig = config.dfp_d_pin_cfg.into();
         dp_config_reg.set_dfpd_pin_assignment(cfg_raw.bits());
 
-        self.tps6699x.set_dp_config(port, dp_config_reg).await?;
+        self.tps6699x
+            .set_dp_config(port, dp_config_reg)
+            .await
+            .map_err(|e| self.log_error(e))?;
         Ok(())
     }
 
-    async fn execute_drst(&mut self, port: LocalPortId) -> Result<(), Error<Self::BusError>> {
+    async fn execute_drst(&mut self, port: LocalPortId) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
-        match self.tps6699x.execute_drst(port).await? {
+        match self.tps6699x.execute_drst(port).await.map_err(|e| self.log_error(e))? {
             ReturnValue::Success => Ok(()),
             r => {
                 error!("Error executing DRST on port {}: {:#?}", port.0, r);
-                Err(Error::Pd(PdError::InvalidResponse))
+                Err(PdError::InvalidResponse)
             }
         }
     }
 
-    async fn set_tbt_config(&mut self, port: LocalPortId, config: TbtConfig) -> Result<(), Error<Self::BusError>> {
+    async fn set_tbt_config(&mut self, port: LocalPortId, config: TbtConfig) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         debug!("Port{} setting TBT config: {:#?}", port.0, config);
 
-        let mut config_reg = self.tps6699x.lock_inner().await.get_tbt_config(port).await?;
+        let mut config_reg =
+            { self.tps6699x.lock_inner().await.get_tbt_config(port).await }.map_err(|e| self.log_error(e))?;
 
         config_reg.set_tbt_vid_en(config.tbt_enabled);
         config_reg.set_tbt_mode_en(config.tbt_enabled);
 
-        self.tps6699x.lock_inner().await.set_tbt_config(port, config_reg).await
+        { self.tps6699x.lock_inner().await.set_tbt_config(port, config_reg).await }.map_err(|e| self.log_error(e))
     }
 
     async fn set_pd_state_machine_config(
         &mut self,
         port: LocalPortId,
         config: PdStateMachineConfig,
-    ) -> Result<(), Error<Self::BusError>> {
+    ) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         debug!("Port{} setting PD state machine config: {:#?}", port.0, config);
 
-        let mut config_reg = self.tps6699x.lock_inner().await.get_port_config(port).await?;
+        let mut config_reg =
+            { self.tps6699x.lock_inner().await.get_port_config(port).await }.map_err(|e| self.log_error(e))?;
 
         config_reg.set_disable_pd(!config.enabled);
 
-        self.tps6699x.lock_inner().await.set_port_config(port, config_reg).await
+        { self.tps6699x.lock_inner().await.set_port_config(port, config_reg).await }.map_err(|e| self.log_error(e))
     }
 
     async fn set_type_c_state_machine_config(
         &mut self,
         port: LocalPortId,
         state: TypeCStateMachineState,
-    ) -> Result<(), Error<Self::BusError>> {
+    ) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         debug!("Port{} setting Type-C state machine state: {:#?}", port.0, state);
 
-        let mut config_reg = self.tps6699x.lock_inner().await.get_port_config(port).await?;
+        let mut config_reg =
+            { self.tps6699x.lock_inner().await.get_port_config(port).await }.map_err(|e| self.log_error(e))?;
         let typec_state = match state {
             TypeCStateMachineState::Sink => TypeCStateMachine::Sink,
             TypeCStateMachineState::Source => TypeCStateMachine::Source,
@@ -768,38 +827,39 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
         };
 
         config_reg.set_typec_state_machine(typec_state);
-        self.tps6699x.lock_inner().await.set_port_config(port, config_reg).await
+        { self.tps6699x.lock_inner().await.set_port_config(port, config_reg).await }.map_err(|e| self.log_error(e))
     }
 
-    async fn execute_ucsi_command(
-        &mut self,
-        command: lpm::LocalCommand,
-    ) -> Result<Option<lpm::ResponseData>, Error<Self::BusError>> {
+    async fn execute_ucsi_command(&mut self, command: lpm::LocalCommand) -> Result<Option<lpm::ResponseData>, PdError> {
         self.guard_no_fw_update_active()?;
-        self.tps6699x.execute_ucsi_command(&command).await
+        self.tps6699x
+            .execute_ucsi_command(&command)
+            .await
+            .map_err(|e| self.log_error(e))
     }
 
     async fn execute_electrical_disconnect(
         &mut self,
         port: LocalPortId,
         reconnect_time_s: Option<NonZeroU8>,
-    ) -> Result<(), Error<Self::BusError>> {
+    ) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         let reconnect_time_s = reconnect_time_s.map(|t| t.get());
-        match self.tps6699x.execute_disc(port, reconnect_time_s).await? {
+        match self
+            .tps6699x
+            .execute_disc(port, reconnect_time_s)
+            .await
+            .map_err(|e| self.log_error(e))?
+        {
             ReturnValue::Success => Ok(()),
             r => {
-                debug!("Error executing DISC on port {}: {:#?}", port.0, r);
-                Err(Error::Pd(PdError::InvalidResponse))
+                error!("Error executing DISC on port {}: {:#?}", port.0, r);
+                Err(PdError::InvalidResponse)
             }
         }
     }
 
-    async fn set_power_state(
-        &mut self,
-        port: LocalPortId,
-        state: SystemPowerState,
-    ) -> Result<(), Error<Self::BusError>> {
+    async fn set_power_state(&mut self, port: LocalPortId, state: SystemPowerState) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         use tps6699x::registers::SystemPowerState as DriverSystemPowerState;
 
@@ -811,7 +871,10 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
             SystemPowerState::S0ix => DriverSystemPowerState::S0Ix,
         };
 
-        self.tps6699x.set_sx_app_config(port, driver_state).await
+        self.tps6699x
+            .set_sx_app_config(port, driver_state)
+            .await
+            .map_err(|e| self.log_error(e))
     }
 }
 

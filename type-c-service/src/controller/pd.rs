@@ -15,10 +15,7 @@ impl<
 > Port<'device, C, Shared, PowerSender, LoopbackSender>
 {
     /// Process a VDM event by retrieving the relevant VDM data from the `controller` for the appropriate `port`.
-    pub(super) async fn process_vdm_event(
-        &mut self,
-        event: VdmNotification,
-    ) -> Result<ServicePortEventData, Error<<C::Inner as Controller>::BusError>> {
+    pub(super) async fn process_vdm_event(&mut self, event: VdmNotification) -> Result<ServicePortEventData, PdError> {
         debug!("({}): Processing VDM event: {:?}", self.name, event);
         let vdm_data = {
             let mut controller = self.controller.lock().await;
@@ -42,9 +39,7 @@ impl<
     }
 
     /// Process a DisplayPort status update by retrieving the current DP status from the `controller` for the appropriate `port`.
-    pub(super) async fn process_dp_status_update(
-        &mut self,
-    ) -> Result<ServicePortEventData, Error<<C::Inner as Controller>::BusError>> {
+    pub(super) async fn process_dp_status_update(&mut self) -> Result<ServicePortEventData, PdError> {
         debug!("({}): Processing DP status update event", self.name);
         let status = self.controller.lock().await.get_dp_status(self.port).await?;
         let event = ServicePortEventData::DpStatusUpdate(status);
@@ -58,9 +53,7 @@ impl<
         Ok(event)
     }
 
-    pub(super) async fn process_pd_alert(
-        &mut self,
-    ) -> Result<Option<ServicePortEventData>, Error<<C::Inner as Controller>::BusError>> {
+    pub(super) async fn process_pd_alert(&mut self) -> Result<Option<ServicePortEventData>, PdError> {
         let ado = self.controller.lock().await.get_pd_alert(self.port).await?;
         debug!("({}): PD alert: {:#?}", self.name, ado);
         if let Some(ado) = ado {
