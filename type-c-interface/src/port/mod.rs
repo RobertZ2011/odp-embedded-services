@@ -20,7 +20,7 @@ use crate::control::tbt::TbtConfig;
 use crate::control::type_c::TypeCStateMachineState;
 use crate::control::usb::UsbControlConfig;
 use crate::control::vdm::{AttnVdm, OtherVdm, SendVdm};
-use crate::controller::{ControllerId, ControllerStatus};
+use crate::controller::ControllerId;
 use crate::service::event::PortEvent as ServicePortEvent;
 
 /// Port-specific command data
@@ -116,8 +116,6 @@ pub type PortResponse = Result<PortResponseData, PdError>;
 pub enum InternalCommandData {
     /// Reset the PD controller
     Reset,
-    /// Get controller status
-    Status,
     /// Sync controller state
     SyncState,
 }
@@ -135,22 +133,20 @@ pub enum Command {
 /// Controller-specific response data
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum InternalResponseData<'a> {
+pub enum InternalResponseData {
     /// Command complete
     Complete,
-    /// Controller status
-    Status(ControllerStatus<'a>),
 }
 
 /// Response for controller-specific commands
-pub type InternalResponse<'a> = Result<InternalResponseData<'a>, PdError>;
+pub type InternalResponse = Result<InternalResponseData, PdError>;
 
 /// PD controller command response
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum Response<'a> {
+pub enum Response {
     /// Controller response
-    Controller(InternalResponse<'a>),
+    Controller(InternalResponse),
     /// Port response
     Port(PortResponse),
 }
@@ -171,7 +167,7 @@ pub struct Device<'a> {
     id: ControllerId,
     pub ports: &'a [PortRegistration],
     num_ports: usize,
-    command: deferred::Channel<GlobalRawMutex, Command, Response<'static>>,
+    command: deferred::Channel<GlobalRawMutex, Command, Response>,
 }
 
 impl intrusive_list::NodeContainer for Device<'static> {
@@ -198,7 +194,7 @@ impl<'a> Device<'a> {
     }
 
     /// Send a command to this controller
-    pub async fn execute_command(&self, command: Command) -> Response<'_> {
+    pub async fn execute_command(&self, command: Command) -> Response {
         self.command.execute(command).await
     }
 
@@ -224,7 +220,7 @@ impl<'a> Device<'a> {
     /// Create a command handler for this controller
     ///
     /// DROP SAFETY: Direct call to deferred channel primitive
-    pub async fn receive(&self) -> deferred::Request<'_, GlobalRawMutex, Command, Response<'static>> {
+    pub async fn receive(&self) -> deferred::Request<'_, GlobalRawMutex, Command, Response> {
         self.command.receive().await
     }
 

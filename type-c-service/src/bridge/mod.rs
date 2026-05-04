@@ -34,7 +34,7 @@ where
     }
 
     /// Handle a port command
-    pub async fn process_port_command(&mut self, command: &port::PortCommand) -> Response<'static> {
+    pub async fn process_port_command(&mut self, command: &port::PortCommand) -> Response {
         let local_port = if let Ok(port) = self.registration.lookup_local_port(command.port) {
             port
         } else {
@@ -122,14 +122,9 @@ where
         })
     }
 
-    pub async fn process_controller_command(&mut self, command: &port::InternalCommandData) -> Response<'static> {
+    pub async fn process_controller_command(&mut self, command: &port::InternalCommandData) -> Response {
         let mut controller = self.controller.lock().await;
         match command {
-            port::InternalCommandData::Status => {
-                let status = controller.get_controller_status().await;
-                port::Response::Controller(status.map(InternalResponseData::Status))
-            }
-            // This isn't sent by the type-C service, disable it for the transition
             port::InternalCommandData::SyncState => port::Response::Controller(Ok(InternalResponseData::Complete)),
             port::InternalCommandData::Reset => {
                 let result = controller.reset_controller().await;

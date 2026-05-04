@@ -17,7 +17,6 @@ use type_c_interface::control::tbt::TbtConfig;
 use type_c_interface::control::type_c::TypeCStateMachineState;
 use type_c_interface::control::usb::UsbControlConfig;
 use type_c_interface::control::vdm::{AttnVdm, OtherVdm, SendVdm};
-use type_c_interface::controller::ControllerStatus;
 use type_c_interface::port::event::PortEventBitfield;
 use type_c_service::controller::state::SharedState;
 use type_c_service::util::power_capability_from_current;
@@ -135,16 +134,6 @@ impl<const N: usize> type_c_service::controller::event_receiver::InterruptReceiv
 }
 
 impl type_c_interface::controller::Controller for Controller<'_> {
-    async fn get_controller_status(&mut self) -> Result<ControllerStatus<'static>, PdError> {
-        debug!("Get controller status");
-        Ok(ControllerStatus {
-            mode: "Test",
-            valid_fw_bank: true,
-            fw_version0: 0xbadf00d,
-            fw_version1: 0xdeadbeef,
-        })
-    }
-
     async fn reset_controller(&mut self) -> Result<(), PdError> {
         debug!("Reset controller");
         Ok(())
@@ -262,7 +251,7 @@ impl type_c_interface::controller::type_c::StateMachine for Controller<'_> {
     }
 }
 
-impl type_c_interface::controller::ucsi::Lpm for Controller<'_> {
+impl type_c_interface::ucsi::Lpm for Controller<'_> {
     async fn execute_lpm_command(&mut self, command: lpm::LocalCommand) -> Result<Option<lpm::ResponseData>, PdError> {
         debug!("Execute UCSI command for port {:?}: {command:?}", command.port());
         match command.operation() {

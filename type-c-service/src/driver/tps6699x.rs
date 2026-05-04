@@ -37,9 +37,9 @@ use type_c_interface::control::tbt::TbtConfig;
 use type_c_interface::control::type_c::TypeCStateMachineState;
 use type_c_interface::control::usb::UsbControlConfig;
 use type_c_interface::control::vdm::{ATTN_VDM_LEN, AttnVdm, OtherVdm, SendVdm};
+use type_c_interface::controller::Controller;
 use type_c_interface::controller::pd::Pd;
 use type_c_interface::controller::retimer::Retimer;
-use type_c_interface::controller::{Controller, ControllerStatus};
 use type_c_interface::port::event::PortEventBitfield;
 
 use crate::util::{
@@ -353,20 +353,6 @@ impl<M: RawMutex, B: I2c> Controller for Tps6699x<'_, M, B> {
         self.tps6699x.reset(&mut delay).await.map_err(|e| self.log_error(e))?;
 
         Ok(())
-    }
-
-    async fn get_controller_status(&mut self) -> Result<ControllerStatus<'static>, PdError> {
-        self.guard_no_fw_update_active()?;
-        let boot_flags = self.tps6699x.get_boot_flags().await.map_err(|e| self.log_error(e))?;
-        let customer_use = CustomerUse(self.tps6699x.get_customer_use().await.map_err(|e| self.log_error(e))?);
-
-        Ok(ControllerStatus {
-            mode: self.tps6699x.get_mode().await.map_err(|e| self.log_error(e))?.into(),
-            valid_fw_bank: (boot_flags.active_bank() == 0 && boot_flags.bank0_valid() != 0)
-                || (boot_flags.active_bank() == 1 && boot_flags.bank1_valid() != 0),
-            fw_version0: customer_use.ti_fw_version(),
-            fw_version1: customer_use.custom_fw_version(),
-        })
     }
 }
 
