@@ -6,7 +6,8 @@ use embedded_services::GlobalRawMutex;
 use embedded_usb_pd::{GlobalPortId, PdError as Error};
 use log::*;
 use static_cell::StaticCell;
-use type_c_interface::port::{self, ControllerId, PortRegistration};
+use type_c_interface::controller::{ControllerId, ControllerStatus};
+use type_c_interface::port::{self, PortRegistration};
 use type_c_interface::service::context::{Context, DeviceContainer};
 use type_c_interface::service::event::PortEvent as ServicePortEvent;
 
@@ -16,7 +17,7 @@ const PORT1_ID: GlobalPortId = GlobalPortId(1);
 const CHANNEL_CAPACITY: usize = 4;
 
 mod test_controller {
-    use type_c_interface::port::{ControllerStatus, PortRegistration};
+    use type_c_interface::port::PortRegistration;
 
     use super::*;
 

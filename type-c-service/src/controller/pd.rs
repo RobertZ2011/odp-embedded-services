@@ -1,9 +1,6 @@
 //! PD functionality unrelated to power contracts and general port status
 use embedded_services::{event::Sender, sync::Lockable};
-use type_c_interface::port::{
-    Controller,
-    event::{VdmData, VdmNotification},
-};
+use type_c_interface::port::event::{VdmData, VdmNotification};
 use type_c_interface::service::event::{PortEvent as ServicePortEvent, PortEventData as ServicePortEventData};
 
 use super::*;

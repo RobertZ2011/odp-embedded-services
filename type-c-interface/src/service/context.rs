@@ -2,11 +2,17 @@ use embassy_time::{Duration, with_timeout};
 use embedded_usb_pd::ucsi::lpm;
 use embedded_usb_pd::{GlobalPortId, PdError};
 
-use crate::port::ControllerId;
+use crate::control::dp::{DpConfig, DpStatus};
+use crate::control::pd::PdStateMachineConfig;
+use crate::control::retimer::RetimerFwUpdateState;
+use crate::control::tbt::TbtConfig;
+use crate::control::type_c::TypeCStateMachineState;
+use crate::control::usb::UsbControlConfig;
+use crate::control::vdm::{AttnVdm, OtherVdm, SendVdm};
+use crate::controller::{ControllerId, ControllerStatus};
 use crate::port::{
-    AttnVdm, Command, ControllerStatus, Device, DpConfig, DpStatus, InternalCommandData, InternalResponseData,
-    OtherVdm, PdStateMachineConfig, PortCommand, PortCommandData, PortResponseData, Response, RetimerFwUpdateState,
-    SendVdm, TbtConfig, TypeCStateMachineState, UsbControlConfig,
+    Command, Device, InternalCommandData, InternalResponseData, PortCommand, PortCommandData, PortResponseData,
+    Response,
 };
 use crate::service;
 use crate::service::event::{Event, PortEvent};

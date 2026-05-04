@@ -2,10 +2,9 @@
 use embedded_services::{debug, error, event::Sender, info, named::Named, sync::Lockable};
 use embedded_usb_pd::{Error, GlobalPortId, LocalPortId, PdError};
 use power_policy_interface::psu::PsuState;
-use type_c_interface::port::event::PortEventBitfield;
-use type_c_interface::port::{
-    Controller, PortStatus, event::PortEvent as InterfacePortEvent, event::PortStatusEventBitfield,
-};
+use type_c_interface::control::pd::PortStatus;
+use type_c_interface::controller::Controller;
+use type_c_interface::port::{event::PortEvent as InterfacePortEvent, event::PortStatusEventBitfield};
 use type_c_interface::service::event::{
     PortEvent as ServicePortEvent, PortEventData as ServicePortEventData, StatusChangedData,
 };

@@ -9,7 +9,6 @@ use power_policy_interface::{
     capability::{ConsumerPowerCapability, ProviderPowerCapability, PsuType},
     psu::{Error as PsuError, Psu, State},
 };
-use type_c_interface::port::Controller;
 
 use crate::{controller::config::UnconstrainedSink, util::power_policy_error_from_pd_bus_error};
 

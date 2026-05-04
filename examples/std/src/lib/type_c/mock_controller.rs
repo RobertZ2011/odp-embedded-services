@@ -9,11 +9,16 @@ use embedded_usb_pd::{type_c::ConnectionState, ucsi::lpm};
 use log::{debug, info};
 
 use power_policy_interface::capability::PowerCapability;
-use type_c_interface::port::SystemPowerState;
-use type_c_interface::port::{
-    AttnVdm, ControllerStatus, DpConfig, DpPinConfig, DpStatus, OtherVdm, PdStateMachineConfig, PortStatus,
-    RetimerFwUpdateState, SendVdm, TbtConfig, TypeCStateMachineState, UsbControlConfig, event::PortEventBitfield,
-};
+use type_c_interface::control::dp::{DpConfig, DpPinConfig, DpStatus};
+use type_c_interface::control::pd::{PdStateMachineConfig, PortStatus};
+use type_c_interface::control::power::SystemPowerState;
+use type_c_interface::control::retimer::RetimerFwUpdateState;
+use type_c_interface::control::tbt::TbtConfig;
+use type_c_interface::control::type_c::TypeCStateMachineState;
+use type_c_interface::control::usb::UsbControlConfig;
+use type_c_interface::control::vdm::{AttnVdm, OtherVdm, SendVdm};
+use type_c_interface::controller::ControllerStatus;
+use type_c_interface::port::event::PortEventBitfield;
 use type_c_service::controller::state::SharedState;
 use type_c_service::util::power_capability_from_current;
 
@@ -129,7 +134,7 @@ impl<const N: usize> type_c_service::controller::event_receiver::InterruptReceiv
     }
 }
 
-impl type_c_interface::port::Controller for Controller<'_> {
+impl type_c_interface::controller::Controller for Controller<'_> {
     type BusError = ();
 
     async fn get_port_status(&mut self, _port: LocalPortId) -> Result<PortStatus, Error<Self::BusError>> {

@@ -2,17 +2,18 @@
 
 use embedded_services::{debug, sync::Lockable};
 use embedded_usb_pd::{Error, PdError, ucsi::lpm};
-use type_c_interface::port::{self, Controller as _, InternalResponseData, Response};
+use type_c_interface::controller::Controller as _;
+use type_c_interface::port::{self, InternalResponseData, Response};
 
 use crate::bridge::event_receiver::{ControllerCommand, OutputControllerCommand};
 pub mod event_receiver;
 
-pub struct Bridge<'device, Controller: Lockable<Inner: port::Controller>> {
+pub struct Bridge<'device, Controller: Lockable<Inner: type_c_interface::controller::Controller>> {
     controller: &'device Controller,
     registration: &'static port::Device<'static>,
 }
 
-impl<'device, Controller: Lockable<Inner: port::Controller>> Bridge<'device, Controller> {
+impl<'device, Controller: Lockable<Inner: type_c_interface::controller::Controller>> Bridge<'device, Controller> {
     pub fn new(controller: &'device Controller, registration: &'static port::Device<'static>) -> Self {
         Self {
             controller,

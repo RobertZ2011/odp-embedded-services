@@ -29,14 +29,16 @@ use tps6699x::command::{
 use tps6699x::fw_update::UpdateConfig as FwUpdateConfig;
 use tps6699x::registers::field_sets::IntEventBus1;
 use tps6699x::registers::port_config::TypeCStateMachine;
+use type_c_interface::control::dp::{DpConfig, DpPinConfig, DpStatus};
+use type_c_interface::control::pd::{PdStateMachineConfig, PortStatus};
+use type_c_interface::control::power::SystemPowerState;
+use type_c_interface::control::retimer::RetimerFwUpdateState;
+use type_c_interface::control::tbt::TbtConfig;
+use type_c_interface::control::type_c::TypeCStateMachineState;
+use type_c_interface::control::usb::UsbControlConfig;
+use type_c_interface::control::vdm::{ATTN_VDM_LEN, AttnVdm, OtherVdm, SendVdm};
+use type_c_interface::controller::{Controller, ControllerStatus};
 use type_c_interface::port::event::PortEventBitfield;
-use type_c_interface::port::{
-    ATTN_VDM_LEN, DpConfig, DpStatus, PdStateMachineConfig, RetimerFwUpdateState, SystemPowerState,
-};
-use type_c_interface::port::{
-    AttnVdm, Controller, ControllerStatus, DpPinConfig, OtherVdm, PortStatus, SendVdm, TbtConfig,
-    TypeCStateMachineState, UsbControlConfig,
-};
 
 use crate::util::power_capability_try_from_contract;
 use crate::util::{basic_fw_update_error_from_pd_bus_error, power_capability_from_current};
