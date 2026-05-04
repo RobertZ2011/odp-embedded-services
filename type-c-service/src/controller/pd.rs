@@ -23,12 +23,14 @@ impl<
         event: VdmNotification,
     ) -> Result<ServicePortEventData, Error<<C::Inner as Controller>::BusError>> {
         debug!("({}): Processing VDM event: {:?}", self.name, event);
-        let mut controller = self.controller.lock().await;
-        let vdm_data = match event {
-            VdmNotification::Entered => VdmData::Entered(controller.get_other_vdm(self.port).await?),
-            VdmNotification::Exited => VdmData::Exited(controller.get_other_vdm(self.port).await?),
-            VdmNotification::OtherReceived => VdmData::ReceivedOther(controller.get_other_vdm(self.port).await?),
-            VdmNotification::AttentionReceived => VdmData::ReceivedAttn(controller.get_attn_vdm(self.port).await?),
+        let vdm_data = {
+            let mut controller = self.controller.lock().await;
+            match event {
+                VdmNotification::Entered => VdmData::Entered(controller.get_other_vdm(self.port).await?),
+                VdmNotification::Exited => VdmData::Exited(controller.get_other_vdm(self.port).await?),
+                VdmNotification::OtherReceived => VdmData::ReceivedOther(controller.get_other_vdm(self.port).await?),
+                VdmNotification::AttentionReceived => VdmData::ReceivedAttn(controller.get_attn_vdm(self.port).await?),
+            }
         };
 
         let event = ServicePortEventData::Vdm(vdm_data);

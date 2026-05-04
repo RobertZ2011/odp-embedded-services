@@ -7,7 +7,7 @@ use crate::port::{
     event::{PortStatusEventBitfield, VdmData},
 };
 
-/// Enum to contain all port event variants
+/// Struct containing data for a [`PortEventData::StatusChanged`] event
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct StatusChangedData {
