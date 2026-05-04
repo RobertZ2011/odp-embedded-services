@@ -2,19 +2,31 @@
 
 use embedded_services::{debug, sync::Lockable};
 use embedded_usb_pd::{PdError, ucsi::lpm};
-use type_c_interface::controller::Controller as _;
+use type_c_interface::controller::{
+    Controller,
+    pd::{Pd, StateMachine as PdStateMachine},
+    retimer::Retimer,
+    type_c::StateMachine as TypeCStateMachine,
+    ucsi::Lpm as UcsiLpm,
+};
 use type_c_interface::port::{self, InternalResponseData, Response};
 
 use crate::bridge::event_receiver::{ControllerCommand, OutputControllerCommand};
 pub mod event_receiver;
 
-pub struct Bridge<'device, Controller: Lockable<Inner: type_c_interface::controller::Controller>> {
-    controller: &'device Controller,
+pub struct Bridge<'device, C: Lockable>
+where
+    C::Inner: Controller + Pd + PdStateMachine + Retimer + TypeCStateMachine + UcsiLpm,
+{
+    controller: &'device C,
     registration: &'static port::Device<'static>,
 }
 
-impl<'device, Controller: Lockable<Inner: type_c_interface::controller::Controller>> Bridge<'device, Controller> {
-    pub fn new(controller: &'device Controller, registration: &'static port::Device<'static>) -> Self {
+impl<'device, C: Lockable> Bridge<'device, C>
+where
+    C::Inner: Controller + Pd + PdStateMachine + Retimer + TypeCStateMachine + UcsiLpm,
+{
+    pub fn new(controller: &'device C, registration: &'static port::Device<'static>) -> Self {
         Self {
             controller,
             registration,
@@ -104,7 +116,7 @@ impl<'device, Controller: Lockable<Inner: type_c_interface::controller::Controll
                 .map(|_| port::PortResponseData::Complete),
             port::PortCommandData::ExecuteUcsiCommand(command_data) => Ok(port::PortResponseData::UcsiResponse(
                 controller
-                    .execute_ucsi_command(lpm::Command::new(local_port, command_data))
+                    .execute_lpm_command(lpm::Command::new(local_port, command_data))
                     .await,
             )),
         })

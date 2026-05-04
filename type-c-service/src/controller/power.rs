@@ -16,7 +16,7 @@ use super::*;
 
 impl<
     'device,
-    C: Lockable<Inner: Controller>,
+    C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: Sender<event::Loopback>,
@@ -111,7 +111,7 @@ impl<
 
 impl<
     'device,
-    C: Lockable<Inner: Controller>,
+    C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: Sender<event::Loopback>,

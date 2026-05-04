@@ -135,16 +135,6 @@ impl<const N: usize> type_c_service::controller::event_receiver::InterruptReceiv
 }
 
 impl type_c_interface::controller::Controller for Controller<'_> {
-    async fn get_port_status(&mut self, _port: LocalPortId) -> Result<PortStatus, PdError> {
-        debug!("Get port status: {:#?}", *self.state.status.lock().await);
-        Ok(*self.state.status.lock().await)
-    }
-
-    async fn enable_sink_path(&mut self, _port: LocalPortId, enable: bool) -> Result<(), PdError> {
-        debug!("Enable sink path: {enable}");
-        Ok(())
-    }
-
     async fn get_controller_status(&mut self) -> Result<ControllerStatus<'static>, PdError> {
         debug!("Get controller status");
         Ok(ControllerStatus {
@@ -159,24 +149,16 @@ impl type_c_interface::controller::Controller for Controller<'_> {
         debug!("Reset controller");
         Ok(())
     }
+}
 
-    async fn get_rt_fw_update_status(&mut self, _port: LocalPortId) -> Result<RetimerFwUpdateState, PdError> {
-        debug!("Get retimer fw update status");
-        Ok(RetimerFwUpdateState::Inactive)
+impl type_c_interface::controller::pd::Pd for Controller<'_> {
+    async fn get_port_status(&mut self, _port: LocalPortId) -> Result<PortStatus, PdError> {
+        debug!("Get port status: {:#?}", *self.state.status.lock().await);
+        Ok(*self.state.status.lock().await)
     }
 
-    async fn set_rt_fw_update_state(&mut self, _port: LocalPortId) -> Result<(), PdError> {
-        debug!("Set retimer fw update state");
-        Ok(())
-    }
-
-    async fn clear_rt_fw_update_state(&mut self, _port: LocalPortId) -> Result<(), PdError> {
-        debug!("Clear retimer fw update state");
-        Ok(())
-    }
-
-    async fn set_rt_compliance(&mut self, _port: LocalPortId) -> Result<(), PdError> {
-        debug!("Set retimer compliance");
+    async fn enable_sink_path(&mut self, _port: LocalPortId, enable: bool) -> Result<(), PdError> {
+        debug!("Enable sink path: {enable}");
         Ok(())
     }
 
@@ -193,16 +175,6 @@ impl type_c_interface::controller::Controller for Controller<'_> {
 
     async fn set_unconstrained_power(&mut self, _port: LocalPortId, unconstrained: bool) -> Result<(), PdError> {
         debug!("Set unconstrained power: {unconstrained}");
-        Ok(())
-    }
-
-    async fn set_max_sink_voltage(&mut self, port: LocalPortId, voltage_mv: Option<u16>) -> Result<(), PdError> {
-        debug!("Set max sink voltage for port {}: {:?}", port.0, voltage_mv);
-        Ok(())
-    }
-
-    async fn reconfigure_retimer(&mut self, port: LocalPortId) -> Result<(), PdError> {
-        debug!("reconfigure_retimer(port: {port:?})");
         Ok(())
     }
 
@@ -259,7 +231,16 @@ impl type_c_interface::controller::Controller for Controller<'_> {
         debug!("Set Thunderbolt config for port {port:?}: {config:?}");
         Ok(())
     }
+}
 
+impl type_c_interface::controller::max_sink_voltage::MaxSinkVoltage for Controller<'_> {
+    async fn set_max_sink_voltage(&mut self, port: LocalPortId, voltage_mv: Option<u16>) -> Result<(), PdError> {
+        debug!("Set max sink voltage for port {}: {:?}", port.0, voltage_mv);
+        Ok(())
+    }
+}
+
+impl type_c_interface::controller::pd::StateMachine for Controller<'_> {
     async fn set_pd_state_machine_config(
         &mut self,
         port: LocalPortId,
@@ -268,7 +249,9 @@ impl type_c_interface::controller::Controller for Controller<'_> {
         debug!("Set PD State Machine config for port {port:?}: {config:?}");
         Ok(())
     }
+}
 
+impl type_c_interface::controller::type_c::StateMachine for Controller<'_> {
     async fn set_type_c_state_machine_config(
         &mut self,
         port: LocalPortId,
@@ -277,8 +260,10 @@ impl type_c_interface::controller::Controller for Controller<'_> {
         debug!("Set Type-C State Machine state for port {port:?}: {state:?}");
         Ok(())
     }
+}
 
-    async fn execute_ucsi_command(&mut self, command: lpm::LocalCommand) -> Result<Option<lpm::ResponseData>, PdError> {
+impl type_c_interface::controller::ucsi::Lpm for Controller<'_> {
+    async fn execute_lpm_command(&mut self, command: lpm::LocalCommand) -> Result<Option<lpm::ResponseData>, PdError> {
         debug!("Execute UCSI command for port {:?}: {command:?}", command.port());
         match command.operation() {
             lpm::CommandData::GetConnectorStatus => Ok(Some(lpm::ResponseData::GetConnectorStatus(
@@ -287,7 +272,9 @@ impl type_c_interface::controller::Controller for Controller<'_> {
             _ => Err(PdError::UnrecognizedCommand.into()),
         }
     }
+}
 
+impl type_c_interface::controller::electrical_disconnect::ElectricalDisconnect for Controller<'_> {
     async fn execute_electrical_disconnect(
         &mut self,
         port: LocalPortId,
@@ -296,9 +283,38 @@ impl type_c_interface::controller::Controller for Controller<'_> {
         debug!("Execute electrical disconnect for port {port:?} with reconnect time {reconnect_time_s:?}");
         Ok(())
     }
+}
 
-    async fn set_power_state(&mut self, port: LocalPortId, state: SystemPowerState) -> Result<(), PdError> {
-        debug!("Set power state for port {port:?}: {state:?}");
+impl type_c_interface::controller::power::SystemPowerState for Controller<'_> {
+    async fn set_system_power_state(&mut self, port: LocalPortId, state: SystemPowerState) -> Result<(), PdError> {
+        debug!("Set system power state for port {port:?}: {state:?}");
+        Ok(())
+    }
+}
+
+impl type_c_interface::controller::retimer::Retimer for Controller<'_> {
+    async fn get_rt_fw_update_status(&mut self, _port: LocalPortId) -> Result<RetimerFwUpdateState, PdError> {
+        debug!("Get retimer fw update status");
+        Ok(RetimerFwUpdateState::Inactive)
+    }
+
+    async fn set_rt_fw_update_state(&mut self, _port: LocalPortId) -> Result<(), PdError> {
+        debug!("Set retimer fw update state");
+        Ok(())
+    }
+
+    async fn clear_rt_fw_update_state(&mut self, _port: LocalPortId) -> Result<(), PdError> {
+        debug!("Clear retimer fw update state");
+        Ok(())
+    }
+
+    async fn set_rt_compliance(&mut self, _port: LocalPortId) -> Result<(), PdError> {
+        debug!("Set retimer compliance");
+        Ok(())
+    }
+
+    async fn reconfigure_retimer(&mut self, port: LocalPortId) -> Result<(), PdError> {
+        debug!("reconfigure_retimer(port: {port:?})");
         Ok(())
     }
 }

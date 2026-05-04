@@ -3,7 +3,7 @@ use embedded_services::{debug, error, event::Sender, info, named::Named, sync::L
 use embedded_usb_pd::{GlobalPortId, LocalPortId, PdError};
 use power_policy_interface::psu::PsuState;
 use type_c_interface::control::pd::PortStatus;
-use type_c_interface::controller::Controller;
+use type_c_interface::controller::pd::Pd;
 use type_c_interface::port::{event::PortEvent as InterfacePortEvent, event::PortStatusEventBitfield};
 use type_c_interface::service::event::{
     PortEvent as ServicePortEvent, PortEventData as ServicePortEventData, StatusChangedData,
@@ -22,7 +22,7 @@ pub mod state;
 
 pub struct Port<
     'device,
-    C: Lockable<Inner: Controller>,
+    C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: Sender<event::Loopback>,
@@ -53,7 +53,7 @@ pub struct Port<
 
 impl<
     'device,
-    C: Lockable<Inner: Controller>,
+    C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: Sender<event::Loopback>,
@@ -220,7 +220,7 @@ impl<
 
 impl<
     'device,
-    C: Lockable<Inner: Controller>,
+    C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: Sender<event::Loopback>,

@@ -8,7 +8,7 @@ use crate::controller::state::SharedState;
 
 impl<
     'device,
-    C: Lockable<Inner: Controller>,
+    C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: Sender<event::Loopback>,
