@@ -6,7 +6,14 @@ use embedded_usb_pd::{GlobalPortId, LocalPortId, PdError, ado::Ado};
 use embedded_services::ipc::deferred;
 use embedded_services::{GlobalRawMutex, intrusive_list};
 
+pub mod electrical_disconnect;
 pub mod event;
+pub mod max_sink_voltage;
+pub mod pd;
+pub mod power;
+pub mod retimer;
+pub mod type_c;
+pub mod ucsi;
 
 use crate::control::dp::{DpConfig, DpStatus};
 use crate::control::pd::PdStateMachineConfig;
