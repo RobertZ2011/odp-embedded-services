@@ -16,6 +16,7 @@ use crate::controller::state::SharedState;
 pub mod config;
 pub mod event;
 pub mod event_receiver;
+pub mod macros;
 mod pd;
 mod power;
 pub mod state;

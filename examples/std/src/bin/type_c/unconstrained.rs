@@ -26,7 +26,9 @@ use type_c_service::bridge::Bridge;
 use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
 use type_c_service::controller::event_receiver::InterruptReceiver as _;
 use type_c_service::controller::event_receiver::{EventReceiver as PortEventReceiver, PortEventSplitter};
+use type_c_service::controller::macros::PortComponents;
 use type_c_service::controller::state::SharedState;
+use type_c_service::define_controller_port_static_cell_channel;
 use type_c_service::service::{EventReceiver as ServiceEventReceiver, Service};
 
 const CHANNEL_CAPACITY: usize = 4;
@@ -133,37 +135,20 @@ async fn task(spawner: Spawner) {
 
     controller_context.register_controller(pd_registration0).unwrap();
 
-    static POLICY_CHANNEL0: StaticCell<Channel<GlobalRawMutex, psu::event::EventData, 1>> = StaticCell::new();
-    let policy_channel0 = POLICY_CHANNEL0.init(Channel::new());
-    let policy_sender0 = policy_channel0.dyn_sender();
-    let policy_receiver0 = policy_channel0.dyn_receiver();
-
-    static PORT0_LOOPBACK_CHANNEL: StaticCell<Channel<GlobalRawMutex, type_c_service::controller::event::Loopback, 1>> =
-        StaticCell::new();
-    let port0_loopback_channel = PORT0_LOOPBACK_CHANNEL.init(Channel::new());
-    let port0_loopback_sender = port0_loopback_channel.dyn_sender();
-    let port0_loopback_receiver = port0_loopback_channel.dyn_receiver();
-
-    static PORT_SHARED_STATE0: StaticCell<SharedStateType> = StaticCell::new();
-    let port_shared_state0 = PORT_SHARED_STATE0.init(Mutex::new(SharedState::new()));
-    static PORT_INTERRUPT_CHANNEL_0: StaticCell<Channel<GlobalRawMutex, PortEventBitfield, CHANNEL_CAPACITY>> =
-        StaticCell::new();
-    let port_interrupt_channel_0 = PORT_INTERRUPT_CHANNEL_0.init(Channel::new());
-    let port_interrupt_receiver_0 = port_interrupt_channel_0.dyn_receiver();
-    let port_interrupt_sender_0 = port_interrupt_channel_0.dyn_sender();
-
-    static PORT0: StaticCell<PortType> = StaticCell::new();
-    let port0 = PORT0.init(Mutex::new(Port::new(
+    define_controller_port_static_cell_channel!(pub(self), port0, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
+    let PortComponents {
+        port: port0,
+        power_policy_receiver: policy_receiver0,
+        event_receiver: event_receiver0,
+        interrupt_sender: port0_interrupt_sender,
+    } = port0::create(
         "PD0",
-        Default::default(),
         LocalPortId(0),
         PORT0_ID,
+        Default::default(),
         controller0,
-        port_shared_state0,
-        policy_sender0,
-        port0_loopback_sender,
         controller_context,
-    )));
+    );
     let bridge_receiver0 = BridgeEventReceiver::new(pd_registration0);
     let bridge0 = Bridge::new(controller0, pd_registration0);
 
@@ -185,37 +170,20 @@ async fn task(spawner: Spawner) {
 
     controller_context.register_controller(pd_registration1).unwrap();
 
-    static POLICY_CHANNEL1: StaticCell<Channel<GlobalRawMutex, psu::event::EventData, 1>> = StaticCell::new();
-    let policy_channel1 = POLICY_CHANNEL1.init(Channel::new());
-    let policy_sender1 = policy_channel1.dyn_sender();
-    let policy_receiver1 = policy_channel1.dyn_receiver();
-
-    static PORT1_LOOPBACK_CHANNEL: StaticCell<Channel<GlobalRawMutex, type_c_service::controller::event::Loopback, 1>> =
-        StaticCell::new();
-    let port1_loopback_channel = PORT1_LOOPBACK_CHANNEL.init(Channel::new());
-    let port1_loopback_sender = port1_loopback_channel.dyn_sender();
-    let port1_loopback_receiver = port1_loopback_channel.dyn_receiver();
-
-    static PORT_SHARED_STATE1: StaticCell<SharedStateType> = StaticCell::new();
-    let port_shared_state1 = PORT_SHARED_STATE1.init(Mutex::new(SharedState::new()));
-    static PORT_INTERRUPT_CHANNEL_1: StaticCell<Channel<GlobalRawMutex, PortEventBitfield, CHANNEL_CAPACITY>> =
-        StaticCell::new();
-    let port_interrupt_channel_1 = PORT_INTERRUPT_CHANNEL_1.init(Channel::new());
-    let port_interrupt_receiver_1 = port_interrupt_channel_1.dyn_receiver();
-    let port_interrupt_sender_1 = port_interrupt_channel_1.dyn_sender();
-
-    static PORT1: StaticCell<PortType> = StaticCell::new();
-    let port1 = PORT1.init(Mutex::new(Port::new(
+    define_controller_port_static_cell_channel!(pub(self), port1, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
+    let PortComponents {
+        port: port1,
+        power_policy_receiver: policy_receiver1,
+        event_receiver: event_receiver1,
+        interrupt_sender: port1_interrupt_sender,
+    } = port1::create(
         "PD1",
-        Default::default(),
         LocalPortId(0),
         PORT1_ID,
+        Default::default(),
         controller1,
-        port_shared_state1,
-        policy_sender1,
-        port1_loopback_sender,
         controller_context,
-    )));
+    );
     let bridge_receiver1 = BridgeEventReceiver::new(pd_registration1);
     let bridge1 = Bridge::new(controller1, pd_registration1);
 
@@ -237,37 +205,20 @@ async fn task(spawner: Spawner) {
 
     controller_context.register_controller(pd_registration2).unwrap();
 
-    static POLICY_CHANNEL2: StaticCell<Channel<GlobalRawMutex, psu::event::EventData, 1>> = StaticCell::new();
-    let policy_channel2 = POLICY_CHANNEL2.init(Channel::new());
-    let policy_sender2 = policy_channel2.dyn_sender();
-    let policy_receiver2 = policy_channel2.dyn_receiver();
-
-    static PORT2_LOOPBACK_CHANNEL: StaticCell<Channel<GlobalRawMutex, type_c_service::controller::event::Loopback, 1>> =
-        StaticCell::new();
-    let port2_loopback_channel = PORT2_LOOPBACK_CHANNEL.init(Channel::new());
-    let port2_loopback_sender = port2_loopback_channel.dyn_sender();
-    let port2_loopback_receiver = port2_loopback_channel.dyn_receiver();
-
-    static PORT_SHARED_STATE2: StaticCell<SharedStateType> = StaticCell::new();
-    let port_shared_state2 = PORT_SHARED_STATE2.init(Mutex::new(SharedState::new()));
-    static PORT_INTERRUPT_CHANNEL_2: StaticCell<Channel<GlobalRawMutex, PortEventBitfield, CHANNEL_CAPACITY>> =
-        StaticCell::new();
-    let port_interrupt_channel_2 = PORT_INTERRUPT_CHANNEL_2.init(Channel::new());
-    let port_interrupt_receiver_2 = port_interrupt_channel_2.dyn_receiver();
-    let port_interrupt_sender_2 = port_interrupt_channel_2.dyn_sender();
-
-    static PORT2: StaticCell<PortType> = StaticCell::new();
-    let port2 = PORT2.init(Mutex::new(Port::new(
+    define_controller_port_static_cell_channel!(pub(self), port2, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
+    let PortComponents {
+        port: port2,
+        power_policy_receiver: policy_receiver2,
+        event_receiver: event_receiver2,
+        interrupt_sender: port2_interrupt_sender,
+    } = port2::create(
         "PD2",
-        Default::default(),
         LocalPortId(0),
         PORT2_ID,
+        Default::default(),
         controller2,
-        port_shared_state2,
-        policy_sender2,
-        port2_loopback_sender,
         controller_context,
-    )));
+    );
     let bridge_receiver2 = BridgeEventReceiver::new(pd_registration2);
     let bridge2 = Bridge::new(controller2, pd_registration2);
 
@@ -319,45 +270,27 @@ async fn task(spawner: Spawner) {
     spawner.spawn(bridge_task(bridge_receiver0, bridge0).expect("Failed to create bridge0 task"));
     spawner.spawn(bridge_task(bridge_receiver1, bridge1).expect("Failed to create bridge1 task"));
     spawner.spawn(bridge_task(bridge_receiver2, bridge2).expect("Failed to create bridge2 task"));
-    spawner.spawn(
-        port_task(
-            PortEventReceiver::new(port_shared_state0, port_interrupt_receiver_0, port0_loopback_receiver),
-            port0,
-        )
-        .expect("Failed to create controller0 task"),
-    );
+    spawner.spawn(port_task(event_receiver0, port0).expect("Failed to create controller0 task"));
     spawner.spawn(
         interrupt_splitter_task(
             state0.create_interrupt_receiver(),
-            PortEventSplitter::new([port_interrupt_sender_0]),
+            PortEventSplitter::new([port0_interrupt_sender]),
         )
         .expect("Failed to create interrupt splitter 0 task"),
     );
-    spawner.spawn(
-        port_task(
-            PortEventReceiver::new(port_shared_state1, port_interrupt_receiver_1, port1_loopback_receiver),
-            port1,
-        )
-        .expect("Failed to create controller1 task"),
-    );
+    spawner.spawn(port_task(event_receiver1, port1).expect("Failed to create controller1 task"));
     spawner.spawn(
         interrupt_splitter_task(
             state1.create_interrupt_receiver(),
-            PortEventSplitter::new([port_interrupt_sender_1]),
+            PortEventSplitter::new([port1_interrupt_sender]),
         )
         .expect("Failed to create interrupt splitter 1 task"),
     );
-    spawner.spawn(
-        port_task(
-            PortEventReceiver::new(port_shared_state2, port_interrupt_receiver_2, port2_loopback_receiver),
-            port2,
-        )
-        .expect("Failed to create controller2 task"),
-    );
+    spawner.spawn(port_task(event_receiver2, port2).expect("Failed to create controller2 task"));
     spawner.spawn(
         interrupt_splitter_task(
             state2.create_interrupt_receiver(),
-            PortEventSplitter::new([port_interrupt_sender_2]),
+            PortEventSplitter::new([port2_interrupt_sender]),
         )
         .expect("Failed to create interrupt splitter 2 task"),
     );
