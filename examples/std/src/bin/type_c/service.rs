@@ -21,8 +21,6 @@ use type_c_interface::port::event::PortEventBitfield;
 use type_c_interface::port::{Device, PortRegistration};
 use type_c_interface::service::event::PortEvent as ServicePortEvent;
 use type_c_interface::service::event::PortEventData as ServicePortEventData;
-use type_c_service::bridge::Bridge;
-use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
 use type_c_service::controller::event_receiver::InterruptReceiver as _;
 use type_c_service::controller::event_receiver::{EventReceiver as PortEventReceiver, PortEventSplitter};
 use type_c_service::controller::macros::PortComponents;
@@ -96,18 +94,6 @@ async fn interrupt_splitter_task(
 }
 
 #[embassy_executor::task]
-async fn bridge_task(
-    mut event_receiver: BridgeEventReceiver,
-    mut bridge: Bridge<'static, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>>,
-) -> ! {
-    loop {
-        let event = event_receiver.wait_next().await;
-        let output = bridge.process_event(event).await;
-        event_receiver.finalize(output);
-    }
-}
-
-#[embassy_executor::task]
 async fn task(spawner: Spawner) {
     embedded_services::init().await;
 
@@ -134,9 +120,6 @@ async fn task(spawner: Spawner) {
     let pd_registration = PD_REGISTRATION.init(Device::new(CONTROLLER0_ID, port_registration));
 
     controller_context.register_controller(pd_registration).unwrap();
-
-    let bridge_receiver = BridgeEventReceiver::new(pd_registration);
-    let bridge = Bridge::new(controller, pd_registration);
 
     define_controller_port_static_cell_channel!(pub(self), port, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
     let PortComponents {
@@ -193,7 +176,6 @@ async fn task(spawner: Spawner) {
         .expect("Failed to create type-c service task"),
     );
 
-    spawner.spawn(bridge_task(bridge_receiver, bridge).expect("Failed to create bridge task"));
     spawner.spawn(port_task(event_receiver, port).expect("Failed to create controller task"));
 
     spawner.spawn(

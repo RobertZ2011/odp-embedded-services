@@ -22,8 +22,6 @@ use type_c_interface::port::Device;
 use type_c_interface::port::PortRegistration;
 use type_c_interface::port::event::PortEventBitfield;
 use type_c_interface::service::event::PortEvent as ServicePortEvent;
-use type_c_service::bridge::Bridge;
-use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
 use type_c_service::controller::event_receiver::InterruptReceiver as _;
 use type_c_service::controller::event_receiver::{EventReceiver as PortEventReceiver, PortEventSplitter};
 use type_c_service::controller::macros::PortComponents;
@@ -74,18 +72,6 @@ type PortEventReceiverType = PortEventReceiver<
     DynamicReceiver<'static, PortEventBitfield>,
     DynamicReceiver<'static, type_c_service::controller::event::Loopback>,
 >;
-
-#[embassy_executor::task(pool_size = 3)]
-async fn bridge_task(
-    mut event_receiver: BridgeEventReceiver,
-    mut bridge: Bridge<'static, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>>,
-) -> ! {
-    loop {
-        let event = event_receiver.wait_next().await;
-        let output = bridge.process_event(event).await;
-        event_receiver.finalize(output);
-    }
-}
 
 #[embassy_executor::task(pool_size = 3)]
 async fn port_task(mut event_receiver: PortEventReceiverType, port: &'static PortType) {
@@ -149,8 +135,6 @@ async fn task(spawner: Spawner) {
         controller0,
         controller_context,
     );
-    let bridge_receiver0 = BridgeEventReceiver::new(pd_registration0);
-    let bridge0 = Bridge::new(controller0, pd_registration0);
 
     static STATE1: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state1 = STATE1.init(mock_controller::ControllerState::new());
@@ -184,8 +168,6 @@ async fn task(spawner: Spawner) {
         controller1,
         controller_context,
     );
-    let bridge_receiver1 = BridgeEventReceiver::new(pd_registration1);
-    let bridge1 = Bridge::new(controller1, pd_registration1);
 
     static STATE2: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state2 = STATE2.init(mock_controller::ControllerState::new());
@@ -219,8 +201,6 @@ async fn task(spawner: Spawner) {
         controller2,
         controller_context,
     );
-    let bridge_receiver2 = BridgeEventReceiver::new(pd_registration2);
-    let bridge2 = Bridge::new(controller2, pd_registration2);
 
     // The service is the only receiver and we only use a DynImmediatePublisher, which doesn't take a publisher slot
     static POWER_POLICY_CHANNEL: StaticCell<
@@ -267,9 +247,6 @@ async fn task(spawner: Spawner) {
         .expect("Failed to create type-c service task"),
     );
 
-    spawner.spawn(bridge_task(bridge_receiver0, bridge0).expect("Failed to create bridge0 task"));
-    spawner.spawn(bridge_task(bridge_receiver1, bridge1).expect("Failed to create bridge1 task"));
-    spawner.spawn(bridge_task(bridge_receiver2, bridge2).expect("Failed to create bridge2 task"));
     spawner.spawn(port_task(event_receiver0, port0).expect("Failed to create controller0 task"));
     spawner.spawn(
         interrupt_splitter_task(

@@ -27,8 +27,6 @@ use type_c_interface::port::event::PortEventBitfield;
 use type_c_interface::port::{Device, PortRegistration};
 use type_c_interface::service::context::Context;
 use type_c_interface::service::event::{PortEvent as ServicePortEvent, PortEventData as ServicePortEventData};
-use type_c_service::bridge::Bridge;
-use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
 use type_c_service::controller::event::Event as PortEvent;
 use type_c_service::controller::event_receiver::InterruptReceiver as _;
 use type_c_service::controller::event_receiver::{EventReceiver as PortEventReceiver, PortEventSplitter};
@@ -209,18 +207,6 @@ async fn opm_task(_context: &'static Context, _state: [&'static mock_controller:
 }
 
 #[embassy_executor::task(pool_size = 2)]
-async fn bridge_task(
-    mut event_receiver: BridgeEventReceiver,
-    mut bridge: Bridge<'static, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>>,
-) -> ! {
-    loop {
-        let event = event_receiver.wait_next().await;
-        let output = bridge.process_event(event).await;
-        event_receiver.finalize(output);
-    }
-}
-
-#[embassy_executor::task(pool_size = 2)]
 async fn port_task(mut event_receiver: PortEventReceiverType, port: &'static PortType) {
     loop {
         let event = event_receiver.wait_event().await;
@@ -300,9 +286,6 @@ async fn task(spawner: Spawner) {
         controller_context,
     );
 
-    let bridge_receiver0 = BridgeEventReceiver::new(pd_registration0);
-    let bridge0 = Bridge::new(controller0, pd_registration0);
-
     static STATE1: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state1 = STATE1.init(mock_controller::ControllerState::new());
     static CONTROLLER1: StaticCell<ControllerType> = StaticCell::new();
@@ -335,9 +318,6 @@ async fn task(spawner: Spawner) {
         controller1,
         controller_context,
     );
-
-    let bridge_receiver1 = BridgeEventReceiver::new(pd_registration1);
-    let bridge1 = Bridge::new(controller1, pd_registration1);
 
     // Create power policy service
     // The service is the only receiver and we only use a DynImmediatePublisher, which doesn't take a publisher slot
@@ -408,8 +388,6 @@ async fn task(spawner: Spawner) {
         )
         .expect("Failed to create type-c service task"),
     );
-    spawner.spawn(bridge_task(bridge_receiver0, bridge0).expect("Failed to create bridge0 task"));
-    spawner.spawn(bridge_task(bridge_receiver1, bridge1).expect("Failed to create bridge1 task"));
     spawner.spawn(port_task(event_receiver0, port0).expect("Failed to create wrapper0 task"));
     spawner.spawn(
         interrupt_splitter_task(

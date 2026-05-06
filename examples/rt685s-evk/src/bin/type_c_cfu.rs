@@ -32,8 +32,6 @@ use type_c_interface::controller::ControllerId;
 use type_c_interface::port::event::PortEventBitfield;
 use type_c_interface::port::{Device, PortRegistration};
 use type_c_interface::service::event::PortEvent as ServicePortEvent;
-use type_c_service::bridge::Bridge;
-use type_c_service::bridge::event_receiver::EventReceiver as BridgeEventReceiver;
 use type_c_service::controller::Port;
 use type_c_service::controller::event_receiver::{
     EventReceiver as PortEventReceiver, InterruptReceiver as _, PortEventSplitter,
@@ -114,18 +112,6 @@ const CONTROLLER0_ID: ControllerId = ControllerId(0);
 const CONTROLLER0_CFU_ID: ComponentId = 0x12;
 const PORT0_ID: GlobalPortId = GlobalPortId(0);
 const PORT1_ID: GlobalPortId = GlobalPortId(1);
-
-#[embassy_executor::task]
-async fn bridge_task(
-    mut event_receiver: BridgeEventReceiver,
-    mut bridge: Bridge<'static, Tps6699xMutex<'static>>,
-) -> ! {
-    loop {
-        let event = event_receiver.wait_next().await;
-        let output = bridge.process_event(event).await;
-        event_receiver.finalize(output);
-    }
-}
 
 #[embassy_executor::task(pool_size = 2)]
 async fn port_task(mut event_receiver: PortEventReceiverType, port: &'static PortType) {
@@ -355,8 +341,6 @@ async fn main(spawner: Spawner) {
         CONTROLLER0_CFU_ID,
         CfuCustomization,
     );
-    let bridge_receiver = BridgeEventReceiver::new(pd_registration);
-    let bridge = Bridge::new(controller_mutex, pd_registration);
 
     // Create CFU client
     static CFU_CLIENT: OnceLock<CfuClient> = OnceLock::new();
@@ -440,7 +424,6 @@ async fn main(spawner: Spawner) {
         .expect("Failed to create power policy task"),
     );
 
-    spawner.spawn(bridge_task(bridge_receiver, bridge).expect("Failed to create bridge task"));
     spawner.spawn(port_task(event_receiver0, port0).expect("Failed to create controller0 task"));
 
     spawner.spawn(port_task(event_receiver1, port1).expect("Failed to create controller1 task"));
