@@ -1,3 +1,4 @@
+use embedded_services::sync::Lockable;
 use embedded_services::warn;
 use embedded_usb_pd::ucsi::cci::{Cci, GlobalCci};
 use embedded_usb_pd::ucsi::lpm::get_connector_status::{BatteryChargingCapabilityStatus, ConnectorStatusChange};
@@ -8,6 +9,7 @@ use embedded_usb_pd::ucsi::ppm::state_machine::{
 use embedded_usb_pd::ucsi::{GlobalCommand, ResponseData, lpm, ppm};
 use embedded_usb_pd::{PdError, PowerRole};
 use type_c_interface::service::event::{Event, UsciChangeIndicator};
+use type_c_interface::ucsi::Lpm as _;
 
 use super::*;
 
@@ -41,7 +43,7 @@ pub(super) struct State {
     pub(super) psu_connected: bool,
 }
 
-impl Service<'_> {
+impl<'device, Reg: Registration<'device>> Service<'device, Reg> {
     /// PPM reset implementation
     fn process_ppm_reset(&mut self) {
         debug!("Resetting PPM");
@@ -60,7 +62,7 @@ impl Service<'_> {
     fn process_get_capabilities(&self) -> ppm::ResponseData {
         debug!("Get PPM capabilities: {:?}", self.config.ucsi_capabilities);
         let mut capabilities = self.config.ucsi_capabilities;
-        capabilities.num_connectors = self.context.get_num_ports() as u8;
+        capabilities.num_connectors = self.registration.ports().len() as u8;
         ppm::ResponseData::GetCapability(capabilities)
     }
 
@@ -106,17 +108,24 @@ impl Service<'_> {
         command: &ucsi::lpm::GlobalCommand,
     ) -> Result<Option<lpm::ResponseData>, PdError> {
         debug!("Processing LPM command: {:?}", command);
+        let mut port = self.lookup_port(command.port())?.lock().await;
+        let local_port_id = self
+            .registration
+            .ucsi_local_port_id(command.port())
+            .ok_or(PdError::InvalidPort)?;
+        let local_command = ucsi::lpm::LocalCommand::new(local_port_id, command.operation());
+
         match command.operation() {
             lpm::CommandData::GetConnectorCapability => {
                 // Override the capabilities if present in the config
                 if let Some(capabilities) = &self.config.ucsi_port_capabilities {
                     Ok(Some(lpm::ResponseData::GetConnectorCapability(*capabilities)))
                 } else {
-                    self.context.execute_ucsi_command(*command).await
+                    port.execute_lpm_command(local_command).await
                 }
             }
             lpm::CommandData::GetConnectorStatus => {
-                let mut response = self.context.execute_ucsi_command(*command).await;
+                let mut response = port.execute_lpm_command(local_command).await;
                 if let Ok(Some(lpm::ResponseData::GetConnectorStatus(lpm::get_connector_status::ResponseData {
                     status_change: ref mut states_change,
                     status:
@@ -136,7 +145,7 @@ impl Service<'_> {
 
                 response
             }
-            _ => self.context.execute_ucsi_command(*command).await,
+            _ => port.execute_lpm_command(local_command).await,
         }
     }
 
@@ -157,13 +166,12 @@ impl Service<'_> {
         if let Some(_current_port) = self.state.ucsi.pending_ports.pop_front() {
             if let Some(next_port) = self.state.ucsi.pending_ports.front() {
                 debug!("ACK_CCI processed, next pending port: {:?}", next_port);
-                self.context
-                    .broadcast_message(Event::UcsiCci(UsciChangeIndicator {
-                        port: *next_port,
-                        // False here because the OPM gets notified by the CCI, don't need a separate notification
-                        notify_opm: false,
-                    }))
-                    .await;
+                self.broadcast_event(Event::UcsiCci(UsciChangeIndicator {
+                    port: *next_port,
+                    // False here because the OPM gets notified by the CCI, don't need a separate notification
+                    notify_opm: false,
+                }))
+                .await;
             } else {
                 debug!("ACK_CCI processed, no more pending ports");
             }
@@ -359,12 +367,11 @@ impl Service<'_> {
         // of the CCI response to the ACK_CC_CI command. See [`Self::set_cci_connector_change`]
         let notify_opm = self.state.ucsi.pending_ports.is_empty();
         if self.state.ucsi.pending_ports.push_back(port_id).is_ok() {
-            self.context
-                .broadcast_message(Event::UcsiCci(UsciChangeIndicator {
-                    port: port_id,
-                    notify_opm,
-                }))
-                .await;
+            self.broadcast_event(Event::UcsiCci(UsciChangeIndicator {
+                port: port_id,
+                notify_opm,
+            }))
+            .await;
         } else {
             // This shouldn't happen because we have a single slot per port
             // Would likely indicate that an invalid port ID got in somehow

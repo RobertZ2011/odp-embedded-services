@@ -1,14 +1,15 @@
+use embedded_services::sync::Lockable as _;
 use power_policy_interface::service as power_policy;
+use power_policy_interface::service::event::EventData as PowerPolicyEventData;
+use type_c_interface::port::pd::Pd as _;
 
 use super::*;
 
-impl Service<'_> {
+impl<'a, Reg: Registration<'a>> Service<'a, Reg> {
     /// Set the unconstrained state for all ports
     pub(super) async fn set_unconstrained_all(&mut self, unconstrained: bool) -> Result<(), Error> {
-        for port_index in 0..self.context.get_num_ports() {
-            self.context
-                .set_unconstrained_power(GlobalPortId(port_index as u8), unconstrained)
-                .await?;
+        for port in self.registration.ports() {
+            port.lock().await.set_unconstrained_power(unconstrained).await?;
         }
         Ok(())
     }
@@ -28,7 +29,7 @@ impl Service<'_> {
                 self.set_unconstrained_all(true).await?;
             } else {
                 // Only one unconstrained device is present, see if that's one of our ports
-                let num_ports = self.context.get_num_ports();
+                let num_ports = self.registration.ports().len();
                 let unconstrained_port = self
                     .state
                     .port_status
@@ -44,9 +45,10 @@ impl Service<'_> {
                         "Setting port{} to constrained, all others unconstrained",
                         unconstrained_index
                     );
-                    for port_index in 0..num_ports {
-                        self.context
-                            .set_unconstrained_power(GlobalPortId(port_index as u8), port_index != unconstrained_index)
+                    for (port_index, port) in self.registration.ports().iter().enumerate() {
+                        port.lock()
+                            .await
+                            .set_unconstrained_power(port_index != unconstrained_index)
                             .await?;
                     }
                 } else {
@@ -66,21 +68,22 @@ impl Service<'_> {
     }
 
     /// Process power policy events
-    pub(super) async fn process_power_policy_event(&mut self, message: &PowerPolicyEvent) -> Result<(), Error> {
+    pub(super) async fn process_power_policy_event(&mut self, message: &PowerPolicyEventData) -> Result<(), Error> {
         match message {
-            PowerPolicyEvent::Unconstrained(state) => self.process_unconstrained_state_change(state).await,
-            PowerPolicyEvent::ConsumerDisconnected => {
+            PowerPolicyEventData::Unconstrained(state) => self.process_unconstrained_state_change(state).await,
+            PowerPolicyEventData::ConsumerDisconnected => {
                 self.state.ucsi.psu_connected = false;
                 // Notify OPM because this can affect battery charging capability status
                 self.pend_ucsi_connected_ports().await;
                 Ok(())
             }
-            PowerPolicyEvent::ConsumerConnected => {
+            PowerPolicyEventData::ConsumerConnected(_) => {
                 self.state.ucsi.psu_connected = true;
                 // Notify OPM because this can affect battery charging capability status
                 self.pend_ucsi_connected_ports().await;
                 Ok(())
             }
+            _ => Ok(()), // Other events don't require any action from the service
         }
     }
 }

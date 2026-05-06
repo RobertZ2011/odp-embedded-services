@@ -1,24 +1,23 @@
-use core::cell::RefCell;
-use core::future::pending;
-use core::pin::pin;
+use core::marker::PhantomData;
 
-use embassy_futures::select::select_slice;
-use embassy_futures::select::{Either, select};
-use embedded_services::{debug, error, event::Receiver, info, trace};
+use embedded_services::event::Sender as _;
+use embedded_services::{debug, error, info, trace};
 use embedded_usb_pd::GlobalPortId;
 use embedded_usb_pd::PdError as Error;
 use power_policy_interface::service::event::EventData as PowerPolicyEventData;
 use type_c_interface::control::pd::PortStatus;
-use type_c_interface::service::event::{PortEvent, PortEventData};
+use type_c_interface::service::event::{DebugAccessory, PortEvent, PortEventData};
 
-use type_c_interface::port::Device;
 use type_c_interface::port::event::PortStatusEventBitfield;
-use type_c_interface::service::event;
+use type_c_interface::service::event::Event as ServiceEvent;
+
+use crate::service::registration::Registration;
 
 pub mod config;
+pub mod event_receiver;
 mod power;
+pub mod registration;
 mod ucsi;
-pub mod vdm;
 
 const MAX_SUPPORTED_PORTS: usize = 4;
 
@@ -35,45 +34,33 @@ struct State {
 ///
 /// Constructing a Service is the first step in using the Type-C service.
 /// Arguments should be an initialized context
-pub struct Service<'a> {
-    /// Type-C context
-    pub(crate) context: &'a type_c_interface::service::context::Context,
+pub struct Service<'device, Reg: Registration<'device>> {
     /// Current state
     state: State,
     /// Config
     config: config::Config,
-}
-
-/// Power policy events
-// This is present instead of just using [`power_policy::CommsMessage`] to allow for
-// supporting variants like `ConsumerConnected(GlobalPortId, ConsumerPowerCapability)`
-// But there's currently not a way to do look-ups between power policy device IDs and GlobalPortIds
-#[derive(Copy, Clone)]
-pub enum PowerPolicyEvent {
-    /// Unconstrained state changed
-    Unconstrained(power_policy_interface::service::UnconstrainedState),
-    /// Consumer disconnected
-    ConsumerDisconnected,
-    /// Consumer connected
-    ConsumerConnected,
+    /// Service registration
+    registration: Reg,
+    _phantom: PhantomData<&'device ()>,
 }
 
 /// Type-C service events
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub enum Event {
     /// Port event
     PortEvent(PortEvent),
     /// Power policy event
-    PowerPolicy(PowerPolicyEvent),
+    PowerPolicy(PowerPolicyEventData),
 }
 
-impl<'a> Service<'a> {
+impl<'a, Reg: Registration<'a>> Service<'a, Reg> {
     /// Create a new service the given configuration
-    pub fn create(config: config::Config, context: &'a type_c_interface::service::context::Context) -> Self {
+    pub fn create(config: config::Config, registration: Reg) -> Self {
         Self {
-            context,
             state: State::default(),
             config,
+            registration,
+            _phantom: PhantomData,
         }
     }
 
@@ -94,6 +81,22 @@ impl<'a> Service<'a> {
             .get_mut(port_id.0 as usize)
             .ok_or(Error::InvalidPort)? = status;
         Ok(())
+    }
+
+    /// Look up the port for a given global port ID
+    fn lookup_port(&self, port_id: GlobalPortId) -> Result<&Reg::Port, Error> {
+        self.registration
+            .ports()
+            .get(port_id.0 as usize)
+            .ok_or(Error::InvalidPort)
+            .map(|port| *port)
+    }
+
+    /// Send an event to all registered listeners
+    async fn broadcast_event(&mut self, event: ServiceEvent) {
+        for sender in self.registration.event_senders() {
+            sender.send(event).await;
+        }
     }
 
     /// Process events for a specific port
@@ -118,12 +121,11 @@ impl<'a> Service<'a> {
                 debug!("Port{}: Debug accessory disconnected", port_id.0);
             }
 
-            self.context
-                .broadcast_message(event::Event::DebugAccessory(event::DebugAccessory {
-                    port: port_id,
-                    connected: status.is_connected(),
-                }))
-                .await;
+            self.broadcast_event(ServiceEvent::DebugAccessory(DebugAccessory {
+                port: port_id,
+                connected: status.is_connected(),
+            }))
+            .await;
         }
 
         self.set_cached_port_status(port_id, status)?;
@@ -156,79 +158,6 @@ impl<'a> Service<'a> {
             Event::PowerPolicy(event) => {
                 trace!("Processing power policy event");
                 self.process_power_policy_event(&event).await
-            }
-        }
-    }
-}
-
-/// Event receiver for the Type-C service
-pub struct EventReceiver<'a, PowerReceiver: Receiver<PowerPolicyEventData>> {
-    /// Type-C context
-    pub(crate) context: &'a type_c_interface::service::context::Context,
-    /// Power policy event subscriber
-    ///
-    /// Used to allow partial borrows of Self for the call to select
-    power_policy_event_subscriber: RefCell<PowerReceiver>,
-}
-
-impl<'a, PowerReceiver: Receiver<PowerPolicyEventData>> EventReceiver<'a, PowerReceiver> {
-    /// Create a new event receiver
-    pub fn new(
-        context: &'a type_c_interface::service::context::Context,
-        power_policy_event_subscriber: PowerReceiver,
-    ) -> Self {
-        Self {
-            context,
-            power_policy_event_subscriber: RefCell::new(power_policy_event_subscriber),
-        }
-    }
-
-    /// Wait for the next event
-    pub async fn wait_next(&mut self) -> Event {
-        match select(self.wait_port_event(), self.wait_power_policy_event()).await {
-            Either::First(event) => event,
-            Either::Second(event) => event,
-        }
-    }
-
-    /// Wait for a port event
-    async fn wait_port_event(&self) -> Event {
-        let (event, _) = {
-            let mut futures = heapless::Vec::<_, MAX_SUPPORTED_PORTS>::new();
-            for device in self.context.controllers.iter_only::<Device>() {
-                for descriptor in device.ports.iter() {
-                    let _ = futures.push(async move { descriptor.receiver.receive().await });
-                }
-            }
-            select_slice(pin!(&mut futures)).await
-        };
-
-        Event::PortEvent(event)
-    }
-
-    /// Wait for a power policy event
-    #[allow(clippy::await_holding_refcell_ref)]
-    async fn wait_power_policy_event(&self) -> Event {
-        let Ok(mut subscriber) = self.power_policy_event_subscriber.try_borrow_mut() else {
-            // This should never happen because this function is not public and is only called from wait_next, which takes &mut self
-            error!("Attempt to call `wait_power_policy_event` simultaneously");
-            return pending().await;
-        };
-
-        loop {
-            match subscriber.wait_next().await {
-                power_policy_interface::service::event::EventData::Unconstrained(state) => {
-                    return Event::PowerPolicy(PowerPolicyEvent::Unconstrained(state));
-                }
-                power_policy_interface::service::event::EventData::ConsumerDisconnected => {
-                    return Event::PowerPolicy(PowerPolicyEvent::ConsumerDisconnected);
-                }
-                power_policy_interface::service::event::EventData::ConsumerConnected(_) => {
-                    return Event::PowerPolicy(PowerPolicyEvent::ConsumerConnected);
-                }
-                _ => {
-                    // No other events currently implemented
-                }
             }
         }
     }

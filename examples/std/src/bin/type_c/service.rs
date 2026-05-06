@@ -4,7 +4,7 @@ use embassy_sync::mutex::Mutex;
 use embassy_sync::pubsub::{DynImmediatePublisher, DynSubscriber, PubSubChannel};
 use embassy_time::Timer;
 use embedded_services::GlobalRawMutex;
-use embedded_services::event::MapSender;
+use embedded_services::event::{MapSender, NoopSender};
 use embedded_usb_pd::ado::Ado;
 use embedded_usb_pd::type_c::Current;
 use embedded_usb_pd::{GlobalPortId, LocalPortId};
@@ -26,8 +26,8 @@ use type_c_service::controller::event_receiver::{EventReceiver as PortEventRecei
 use type_c_service::controller::macros::PortComponents;
 use type_c_service::controller::state::SharedState;
 use type_c_service::define_controller_port_static_cell_channel;
+use type_c_service::service::Service;
 use type_c_service::service::config::Config;
-use type_c_service::service::{EventReceiver as ServiceEventReceiver, Service};
 use type_c_service::util::power_capability_from_current;
 
 const CHANNEL_CAPACITY: usize = 4;
@@ -57,7 +57,20 @@ type PowerPolicyServiceType = Mutex<
     >,
 >;
 
-type ServiceType = Service<'static>;
+const PORT_COUNT: usize = 1;
+type PortRecevierType = DynamicReceiver<'static, type_c_interface::service::event::PortEventData>;
+type TypeCServiceEventReceiverType = type_c_service::service::event_receiver::ArrayEventReceiver<
+    'static,
+    PORT_COUNT,
+    PortType,
+    PortRecevierType,
+    PowerPolicyReceiverType,
+>;
+type TypeCServiceSenderType = NoopSender;
+type TypeCRegistrationType =
+    type_c_service::service::registration::ArrayRegistration<'static, PortType, PORT_COUNT, TypeCServiceSenderType, 1>;
+
+type ServiceType = type_c_service::service::Service<'static, TypeCRegistrationType>;
 type SharedStateType = Mutex<GlobalRawMutex, SharedState>;
 type PortEventReceiverType = PortEventReceiver<
     'static,
@@ -127,14 +140,8 @@ async fn task(spawner: Spawner) {
         power_policy_receiver,
         event_receiver,
         interrupt_sender: port_interrupt_sender,
-    } = port::create(
-        "PD0",
-        LocalPortId(0),
-        PORT0_ID,
-        Default::default(),
-        controller,
-        controller_context,
-    );
+        type_c_receiver,
+    } = port::create("PD0", LocalPortId(0), Default::default(), controller);
 
     // Create type-c service
     // The service is the only receiver and we only use a DynImmediatePublisher, which doesn't take a publisher slot
@@ -161,7 +168,16 @@ async fn task(spawner: Spawner) {
     )));
 
     static TYPE_C_SERVICE: StaticCell<Mutex<GlobalRawMutex, ServiceType>> = StaticCell::new();
-    let type_c_service = TYPE_C_SERVICE.init(Mutex::new(Service::create(Config::default(), controller_context)));
+    let type_c_service = TYPE_C_SERVICE.init(Mutex::new(Service::create(
+        Config::default(),
+        type_c_service::service::registration::ArrayRegistration {
+            ports: [port],
+            service_senders: [NoopSender],
+            port_data: [type_c_service::service::registration::PortData {
+                local_port: Some(LocalPortId(0)),
+            }],
+        },
+    )));
 
     // Spin up power policy service
     spawner.spawn(
@@ -171,7 +187,7 @@ async fn task(spawner: Spawner) {
     spawner.spawn(
         type_c_service_task(
             type_c_service,
-            ServiceEventReceiver::new(controller_context, power_policy_subscriber),
+            TypeCServiceEventReceiverType::new([port], [type_c_receiver], power_policy_subscriber),
         )
         .expect("Failed to create type-c service task"),
     );
@@ -221,7 +237,7 @@ async fn power_policy_psu_task(
 #[embassy_executor::task]
 async fn type_c_service_task(
     service: &'static Mutex<GlobalRawMutex, ServiceType>,
-    event_receiver: ServiceEventReceiver<'static, PowerPolicyReceiverType>,
+    event_receiver: TypeCServiceEventReceiverType,
 ) {
     info!("Starting type-c task");
     type_c_service::task::task(service, event_receiver).await;
