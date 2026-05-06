@@ -13,7 +13,9 @@ impl<
     C: Lockable<Inner: Pd + ElectricalDisconnect>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> type_c_interface::port::electrical_disconnect::ElectricalDisconnect for Port<'device, C, Shared, PowerSender>
+    LoopbackSender: Sender<event::Loopback>,
+> type_c_interface::port::electrical_disconnect::ElectricalDisconnect
+    for Port<'device, C, Shared, PowerSender, LoopbackSender>
 {
     async fn execute_electrical_disconnect(&mut self, reconnect_time_s: Option<NonZeroU8>) -> Result<(), PdError> {
         self.controller

@@ -258,7 +258,7 @@ impl type_c_interface::ucsi::Lpm for Controller<'_> {
             lpm::CommandData::GetConnectorStatus => Ok(Some(lpm::ResponseData::GetConnectorStatus(
                 lpm::get_connector_status::ResponseData::default(),
             ))),
-            _ => Err(PdError::UnrecognizedCommand.into()),
+            _ => Err(PdError::UnrecognizedCommand),
         }
     }
 }

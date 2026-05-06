@@ -1,5 +1,4 @@
 //! Module for PD controller related code
-//! use embedded_usb_pd::{LocalPortId, PdError};
 
 use embedded_usb_pd::PdError;
 

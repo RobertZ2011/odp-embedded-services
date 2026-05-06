@@ -1,4 +1,4 @@
-//! Control types for code PD functionality
+//! Control types for core PD functionality
 
 use embedded_usb_pd::{
     DataRole, PlugOrientation, PowerRole,

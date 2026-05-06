@@ -170,7 +170,8 @@ impl<
     C: Lockable<Inner: Pd + SystemPowerState>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> type_c_interface::port::power::SystemPowerState for Port<'device, C, Shared, PowerSender>
+    LoopbackSender: Sender<event::Loopback>,
+> type_c_interface::port::power::SystemPowerState for Port<'device, C, Shared, PowerSender, LoopbackSender>
 {
     async fn set_system_power_state(
         &mut self,

@@ -11,7 +11,8 @@ impl<
     C: Lockable<Inner: Pd + UcsiLpm>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
-> type_c_interface::ucsi::Lpm for Port<'device, C, Shared, PowerSender>
+    LoopbackSender: Sender<event::Loopback>,
+> type_c_interface::ucsi::Lpm for Port<'device, C, Shared, PowerSender, LoopbackSender>
 {
     async fn execute_lpm_command(
         &mut self,
