@@ -174,7 +174,8 @@ impl<
     TypeCSender: Sender<type_c_interface::service::event::PortEventData>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: Sender<event::Loopback>,
-> type_c_interface::port::power::SystemPowerStateStatus for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+> type_c_interface::port::power::SystemPowerStateStatus
+    for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
 {
     async fn set_system_power_state_status(
         &mut self,

@@ -1,4 +1,5 @@
 use core::marker::PhantomData;
+use core::ptr;
 
 use embedded_services::event::Sender as _;
 use embedded_services::named::Named as _;
@@ -60,7 +61,7 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
         self.registration
             .ports()
             .iter()
-            .position(|p| *p as *const _ == port as *const _)
+            .position(|p| ptr::eq(*p, port))
             .ok_or(Error::InvalidPort)
     }
 
@@ -70,7 +71,7 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
             .ports()
             .get(port_id.0 as usize)
             .ok_or(Error::InvalidPort)
-            .map(|port| *port)
+            .copied()
     }
 
     /// Send an event to all registered listeners

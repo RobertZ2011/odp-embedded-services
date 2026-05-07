@@ -64,6 +64,8 @@ impl<
 > Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
 {
     /// Create new Port instance
+    // TODO: refactor arguments into a registration struct
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: &'static str,
         config: config::Config,

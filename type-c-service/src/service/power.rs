@@ -1,3 +1,5 @@
+use core::ptr;
+
 use embedded_services::sync::Lockable as _;
 use power_policy_interface::service as power_policy;
 use power_policy_interface::service::event::EventData as PowerPolicyEventData;
@@ -49,7 +51,7 @@ impl<'a, Reg: Registration<'a>> Service<'a, Reg> {
                     for port in self.registration.ports().iter() {
                         port.lock()
                             .await
-                            .set_unconstrained_power(*port as *const _ != unconstrained_port as *const _)
+                            .set_unconstrained_power(ptr::eq(*port, unconstrained_port))
                             .await?;
                     }
                 } else {
