@@ -108,7 +108,7 @@ async fn task(spawner: Spawner) {
     let state = STATE.init(mock_controller::ControllerState::new());
 
     static CONTROLLER: StaticCell<ControllerType> = StaticCell::new();
-    let controller = CONTROLLER.init(Mutex::new(mock_controller::Controller::new(state)));
+    let controller = CONTROLLER.init(Mutex::new(mock_controller::Controller::new(state, "Controller0")));
 
     define_controller_port_static_cell_channel!(pub(self), port, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
     let PortComponents {

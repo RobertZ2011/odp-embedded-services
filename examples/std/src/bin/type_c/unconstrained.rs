@@ -100,7 +100,7 @@ async fn task(spawner: Spawner) {
     static STATE0: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state0 = STATE0.init(mock_controller::ControllerState::new());
     static CONTROLLER0: StaticCell<ControllerType> = StaticCell::new();
-    let controller0 = CONTROLLER0.init(Mutex::new(mock_controller::Controller::new(state0)));
+    let controller0 = CONTROLLER0.init(Mutex::new(mock_controller::Controller::new(state0, "Controller0")));
 
     define_controller_port_static_cell_channel!(pub(self), port0, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
     let PortComponents {
@@ -114,7 +114,7 @@ async fn task(spawner: Spawner) {
     static STATE1: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state1 = STATE1.init(mock_controller::ControllerState::new());
     static CONTROLLER1: StaticCell<ControllerType> = StaticCell::new();
-    let controller1 = CONTROLLER1.init(Mutex::new(mock_controller::Controller::new(state1)));
+    let controller1 = CONTROLLER1.init(Mutex::new(mock_controller::Controller::new(state1, "Controller1")));
 
     define_controller_port_static_cell_channel!(pub(self), port1, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
     let PortComponents {
@@ -128,7 +128,7 @@ async fn task(spawner: Spawner) {
     static STATE2: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state2 = STATE2.init(mock_controller::ControllerState::new());
     static CONTROLLER2: StaticCell<ControllerType> = StaticCell::new();
-    let controller2 = CONTROLLER2.init(Mutex::new(mock_controller::Controller::new(state2)));
+    let controller2 = CONTROLLER2.init(Mutex::new(mock_controller::Controller::new(state2, "Controller2")));
 
     define_controller_port_static_cell_channel!(pub(self), port2, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
     let PortComponents {
