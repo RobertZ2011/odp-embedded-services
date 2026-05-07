@@ -29,26 +29,27 @@ impl<'a, Reg: Registration<'a>> Service<'a, Reg> {
                 self.set_unconstrained_all(true).await?;
             } else {
                 // Only one unconstrained device is present, see if that's one of our ports
-                let num_ports = self.registration.ports().len();
-                let unconstrained_port = self
-                    .state
-                    .port_status
-                    .iter()
-                    .take(num_ports)
-                    .position(|status| status.available_sink_contract.is_some() && status.unconstrained_power);
+                let mut unconstrained_port = None;
+                for port in self.registration.ports().iter() {
+                    let status = port.lock().await.get_port_status().await?;
+                    if status.available_sink_contract.is_some() && status.unconstrained_power {
+                        unconstrained_port = Some(*port);
+                        break;
+                    }
+                }
 
-                if let Some(unconstrained_index) = unconstrained_port {
+                if let Some(unconstrained_port) = unconstrained_port {
                     // One of our ports is the unconstrained consumer
                     // If it switches to sourcing then the system will no longer be unconstrained
                     // So set that port to constrained and unconstrain all others
                     info!(
-                        "Setting port{} to constrained, all others unconstrained",
-                        unconstrained_index
+                        "Setting port ({}) to constrained, all others unconstrained",
+                        unconstrained_port.lock().await.name()
                     );
-                    for (port_index, port) in self.registration.ports().iter().enumerate() {
+                    for port in self.registration.ports().iter() {
                         port.lock()
                             .await
-                            .set_unconstrained_power(port_index != unconstrained_index)
+                            .set_unconstrained_power(*port as *const _ != unconstrained_port as *const _)
                             .await?;
                     }
                 } else {
@@ -72,13 +73,13 @@ impl<'a, Reg: Registration<'a>> Service<'a, Reg> {
         match message {
             PowerPolicyEventData::Unconstrained(state) => self.process_unconstrained_state_change(state).await,
             PowerPolicyEventData::ConsumerDisconnected => {
-                self.state.ucsi.psu_connected = false;
+                self.ucsi.psu_connected = false;
                 // Notify OPM because this can affect battery charging capability status
                 self.pend_ucsi_connected_ports().await;
                 Ok(())
             }
             PowerPolicyEventData::ConsumerConnected(_) => {
-                self.state.ucsi.psu_connected = true;
+                self.ucsi.psu_connected = true;
                 // Notify OPM because this can affect battery charging capability status
                 self.pend_ucsi_connected_ports().await;
                 Ok(())

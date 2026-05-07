@@ -11,7 +11,7 @@ pub async fn task<
     PortReceiver: Receiver<type_c_interface::service::event::PortEventData>,
     PowerReceiver: Receiver<PowerPolicyEventData>,
 >(
-    service: &'static impl Lockable<Inner = Service<'static, impl Registration<'static>>>,
+    service: &'static impl Lockable<Inner = Service<'static, impl Registration<'static, Port = Port>>>,
     mut event_receiver: ArrayEventReceiver<'static, N, Port, PortReceiver, PowerReceiver>,
 ) {
     info!("Starting type-c task");
