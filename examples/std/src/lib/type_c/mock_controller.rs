@@ -274,8 +274,12 @@ impl type_c_interface::controller::electrical_disconnect::ElectricalDisconnect f
     }
 }
 
-impl type_c_interface::controller::power::SystemPowerState for Controller<'_> {
-    async fn set_system_power_state(&mut self, port: LocalPortId, state: SystemPowerState) -> Result<(), PdError> {
+impl type_c_interface::controller::power::SystemPowerStateStatus for Controller<'_> {
+    async fn set_system_power_state_status(
+        &mut self,
+        port: LocalPortId,
+        state: SystemPowerState,
+    ) -> Result<(), PdError> {
         debug!("Set system power state for port {port:?}: {state:?}");
         Ok(())
     }

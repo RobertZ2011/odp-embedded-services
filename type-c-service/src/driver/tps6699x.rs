@@ -854,8 +854,12 @@ impl<M: RawMutex, B: I2c> type_c_interface::controller::electrical_disconnect::E
     }
 }
 
-impl<M: RawMutex, B: I2c> type_c_interface::controller::power::SystemPowerState for Tps6699x<'_, M, B> {
-    async fn set_system_power_state(&mut self, port: LocalPortId, state: SystemPowerState) -> Result<(), PdError> {
+impl<M: RawMutex, B: I2c> type_c_interface::controller::power::SystemPowerStateStatus for Tps6699x<'_, M, B> {
+    async fn set_system_power_state_status(
+        &mut self,
+        port: LocalPortId,
+        state: SystemPowerState,
+    ) -> Result<(), PdError> {
         self.guard_no_fw_update_active()?;
         use tps6699x::registers::SystemPowerState as DriverSystemPowerState;
 

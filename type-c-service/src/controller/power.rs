@@ -9,7 +9,7 @@ use power_policy_interface::{
     capability::{ConsumerPowerCapability, ProviderPowerCapability, PsuType},
     psu::{Error as PsuError, Psu, State},
 };
-use type_c_interface::controller::power::SystemPowerState;
+use type_c_interface::controller::power::SystemPowerStateStatus;
 
 use crate::{controller::config::UnconstrainedSink, util::power_policy_error_from_pd_error};
 
@@ -167,20 +167,20 @@ impl<
 
 impl<
     'device,
-    C: Lockable<Inner: Pd + SystemPowerState>,
+    C: Lockable<Inner: Pd + SystemPowerStateStatus>,
     Shared: Lockable<Inner = SharedState>,
     PowerSender: Sender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: Sender<event::Loopback>,
-> type_c_interface::port::power::SystemPowerState for Port<'device, C, Shared, PowerSender, LoopbackSender>
+> type_c_interface::port::power::SystemPowerStateStatus for Port<'device, C, Shared, PowerSender, LoopbackSender>
 {
-    async fn set_system_power_state(
+    async fn set_system_power_state_status(
         &mut self,
         state: type_c_interface::control::power::SystemPowerState,
     ) -> Result<(), PdError> {
         self.controller
             .lock()
             .await
-            .set_system_power_state(self.port, state)
+            .set_system_power_state_status(self.port, state)
             .await
     }
 }

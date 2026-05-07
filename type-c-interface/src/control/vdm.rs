@@ -76,7 +76,7 @@ pub struct SendVdm {
 }
 
 impl SendVdm {
-    /// Create a new blank port status
+    /// Create a new blank VDM
     pub const fn new() -> Self {
         Self {
             initiator: false,
