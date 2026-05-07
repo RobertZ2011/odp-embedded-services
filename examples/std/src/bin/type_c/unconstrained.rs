@@ -1,5 +1,4 @@
 use embassy_executor::{Executor, Spawner};
-use embassy_sync::channel::Channel;
 use embassy_sync::channel::DynamicReceiver;
 use embassy_sync::channel::DynamicSender;
 use embassy_sync::mutex::Mutex;
@@ -8,7 +7,7 @@ use embassy_time::Timer;
 use embedded_services::GlobalRawMutex;
 use embedded_services::event::MapSender;
 use embedded_services::event::NoopSender;
-use embedded_usb_pd::{GlobalPortId, LocalPortId};
+use embedded_usb_pd::LocalPortId;
 use log::*;
 use power_policy_interface::capability::PowerCapability;
 use power_policy_interface::charger::mock::ChargerType;
@@ -18,11 +17,7 @@ use power_policy_service::service::registration::ArrayRegistration;
 use static_cell::StaticCell;
 use std_examples::type_c::mock_controller::Port;
 use std_examples::type_c::mock_controller::{self, InterruptReceiver};
-use type_c_interface::controller::ControllerId;
-use type_c_interface::port::Device;
-use type_c_interface::port::PortRegistration;
 use type_c_interface::port::event::PortEventBitfield;
-use type_c_interface::service::event::PortEvent as ServicePortEvent;
 use type_c_service::controller::event_receiver::InterruptReceiver as _;
 use type_c_service::controller::event_receiver::{EventReceiver as PortEventReceiver, PortEventSplitter};
 use type_c_service::controller::macros::PortComponents;
@@ -30,17 +25,6 @@ use type_c_service::controller::state::SharedState;
 use type_c_service::define_controller_port_static_cell_channel;
 use type_c_service::service::Service;
 use type_c_service::service::registration::PortData;
-
-const CHANNEL_CAPACITY: usize = 4;
-
-const CONTROLLER0_ID: ControllerId = ControllerId(0);
-const PORT0_ID: GlobalPortId = GlobalPortId(0);
-
-const CONTROLLER1_ID: ControllerId = ControllerId(1);
-const PORT1_ID: GlobalPortId = GlobalPortId(1);
-
-const CONTROLLER2_ID: ControllerId = ControllerId(2);
-const PORT2_ID: GlobalPortId = GlobalPortId(2);
 
 const DELAY_MS: u64 = 1000;
 
@@ -113,27 +97,10 @@ async fn interrupt_splitter_task(
 async fn task(spawner: Spawner) {
     embedded_services::init().await;
 
-    // Create power policy service
-    static CONTROLLER_CONTEXT: StaticCell<type_c_interface::service::context::Context> = StaticCell::new();
-    let controller_context = CONTROLLER_CONTEXT.init(type_c_interface::service::context::Context::new());
-
     static STATE0: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state0 = STATE0.init(mock_controller::ControllerState::new());
     static CONTROLLER0: StaticCell<ControllerType> = StaticCell::new();
     let controller0 = CONTROLLER0.init(Mutex::new(mock_controller::Controller::new(state0)));
-
-    static PORT_CHANNEL0: Channel<GlobalRawMutex, ServicePortEvent, CHANNEL_CAPACITY> = Channel::new();
-    static PORT_REGISTRATION0: StaticCell<[PortRegistration; 1]> = StaticCell::new();
-    let port_registration0 = PORT_REGISTRATION0.init([PortRegistration {
-        id: PORT0_ID,
-        sender: PORT_CHANNEL0.dyn_sender(),
-        receiver: PORT_CHANNEL0.dyn_receiver(),
-    }]);
-
-    static PD_REGISTRATION0: StaticCell<Device<'static>> = StaticCell::new();
-    let pd_registration0 = PD_REGISTRATION0.init(Device::new(CONTROLLER0_ID, port_registration0));
-
-    controller_context.register_controller(pd_registration0).unwrap();
 
     define_controller_port_static_cell_channel!(pub(self), port0, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
     let PortComponents {
@@ -149,19 +116,6 @@ async fn task(spawner: Spawner) {
     static CONTROLLER1: StaticCell<ControllerType> = StaticCell::new();
     let controller1 = CONTROLLER1.init(Mutex::new(mock_controller::Controller::new(state1)));
 
-    static PORT1_CHANNEL: Channel<GlobalRawMutex, ServicePortEvent, CHANNEL_CAPACITY> = Channel::new();
-    static PORT_REGISTRATION1: StaticCell<[PortRegistration; 1]> = StaticCell::new();
-    let port_registration1 = PORT_REGISTRATION1.init([PortRegistration {
-        id: PORT1_ID,
-        sender: PORT1_CHANNEL.dyn_sender(),
-        receiver: PORT1_CHANNEL.dyn_receiver(),
-    }]);
-
-    static PD_REGISTRATION1: StaticCell<Device<'static>> = StaticCell::new();
-    let pd_registration1 = PD_REGISTRATION1.init(Device::new(CONTROLLER1_ID, port_registration1));
-
-    controller_context.register_controller(pd_registration1).unwrap();
-
     define_controller_port_static_cell_channel!(pub(self), port1, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
     let PortComponents {
         port: port1,
@@ -175,19 +129,6 @@ async fn task(spawner: Spawner) {
     let state2 = STATE2.init(mock_controller::ControllerState::new());
     static CONTROLLER2: StaticCell<ControllerType> = StaticCell::new();
     let controller2 = CONTROLLER2.init(Mutex::new(mock_controller::Controller::new(state2)));
-
-    static PORT2_CHANNEL: Channel<GlobalRawMutex, ServicePortEvent, CHANNEL_CAPACITY> = Channel::new();
-    static PORT_REGISTRATION2: StaticCell<[PortRegistration; 1]> = StaticCell::new();
-    let port_registration2 = PORT_REGISTRATION2.init([PortRegistration {
-        id: PORT2_ID,
-        sender: PORT2_CHANNEL.dyn_sender(),
-        receiver: PORT2_CHANNEL.dyn_receiver(),
-    }]);
-
-    static PD_REGISTRATION2: StaticCell<Device<'static>> = StaticCell::new();
-    let pd_registration2 = PD_REGISTRATION2.init(Device::new(CONTROLLER2_ID, port_registration2));
-
-    controller_context.register_controller(pd_registration2).unwrap();
 
     define_controller_port_static_cell_channel!(pub(self), port2, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
     let PortComponents {

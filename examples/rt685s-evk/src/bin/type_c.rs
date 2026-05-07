@@ -8,24 +8,20 @@ use embassy_imxrt::gpio::{Input, Inverter, Pull};
 use embassy_imxrt::i2c::Async;
 use embassy_imxrt::i2c::master::{Config, I2cMaster};
 use embassy_imxrt::{bind_interrupts, peripherals};
-use embassy_sync::channel::{Channel, DynamicReceiver, DynamicSender};
+use embassy_sync::channel::{DynamicReceiver, DynamicSender};
 use embassy_sync::mutex::Mutex;
 use embassy_sync::pubsub::{DynImmediatePublisher, DynSubscriber, PubSubChannel};
 use embassy_time::{self as _, Delay};
 use embedded_services::GlobalRawMutex;
 use embedded_services::event::{MapSender, NoopSender};
 use embedded_services::{error, info};
-use embedded_usb_pd::{GlobalPortId, LocalPortId};
+use embedded_usb_pd::LocalPortId;
 use power_policy_interface::psu;
 use power_policy_service::psu::PsuEventReceivers;
 use power_policy_service::service::registration::ArrayRegistration;
 use static_cell::StaticCell;
 use tps6699x::asynchronous::embassy as tps6699x;
-use type_c_interface::controller::ControllerId;
-use type_c_interface::port::Device;
-use type_c_interface::port::PortRegistration;
 use type_c_interface::port::event::PortEventBitfield;
-use type_c_interface::service::event::PortEvent as ServicePortEvent;
 use type_c_service::controller::Port;
 use type_c_service::controller::event_receiver::{
     EventReceiver as PortEventReceiver, InterruptReceiver as _, PortEventSplitter,
@@ -38,12 +34,6 @@ use type_c_service::service::Service;
 use type_c_service::service::registration::PortData;
 
 extern crate rt685s_evk_example;
-
-const CHANNEL_CAPACITY: usize = 4;
-
-const CONTROLLER0_ID: ControllerId = ControllerId(0);
-const PORT0_ID: GlobalPortId = GlobalPortId(0);
-const PORT1_ID: GlobalPortId = GlobalPortId(1);
 
 bind_interrupts!(struct Irqs {
     FLEXCOMM2 => embassy_imxrt::i2c::InterruptHandler<peripherals::FLEXCOMM2>;
@@ -194,9 +184,6 @@ async fn main(spawner: Spawner) {
         .await
         .unwrap();
 
-    static CONTROLLER_CONTEXT: StaticCell<type_c_interface::service::context::Context> = StaticCell::new();
-    let controller_context = CONTROLLER_CONTEXT.init(type_c_interface::service::context::Context::new());
-
     info!("Spawining PD controller task");
     static CONTROLLER_MUTEX: StaticCell<Tps6699xMutex<'_>> = StaticCell::new();
     let controller_mutex = CONTROLLER_MUTEX.init(Mutex::new(tps6699x_drv::tps66994(
@@ -205,28 +192,6 @@ async fn main(spawner: Spawner) {
         Default::default(),
         "tps6699x_0",
     )));
-
-    static PORT0_CHANNEL: Channel<GlobalRawMutex, ServicePortEvent, CHANNEL_CAPACITY> = Channel::new();
-    static PORT1_CHANNEL: Channel<GlobalRawMutex, ServicePortEvent, CHANNEL_CAPACITY> = Channel::new();
-
-    static PORT_REGISTRATION: StaticCell<[PortRegistration; 2]> = StaticCell::new();
-    let port_registration = PORT_REGISTRATION.init([
-        PortRegistration {
-            id: PORT0_ID,
-            sender: PORT0_CHANNEL.dyn_sender(),
-            receiver: PORT0_CHANNEL.dyn_receiver(),
-        },
-        PortRegistration {
-            id: PORT1_ID,
-            sender: PORT1_CHANNEL.dyn_sender(),
-            receiver: PORT1_CHANNEL.dyn_receiver(),
-        },
-    ]);
-
-    static PD_REGISTRATION: StaticCell<Device<'static>> = StaticCell::new();
-    let pd_registration = PD_REGISTRATION.init(Device::new(CONTROLLER0_ID, port_registration));
-
-    controller_context.register_controller(pd_registration).unwrap();
 
     define_controller_port_static_cell_channel!(pub(self), port0, GlobalRawMutex, Tps6699xMutex<'static>);
     let PortComponents {

@@ -24,8 +24,6 @@ use static_cell::StaticCell;
 use std_examples::type_c::mock_controller::{self, InterruptReceiver, Port};
 use type_c_interface::controller::ControllerId;
 use type_c_interface::port::event::PortEventBitfield;
-use type_c_interface::port::{Device, PortRegistration};
-use type_c_interface::service::context::Context;
 use type_c_interface::service::event::{PortEvent as ServicePortEvent, PortEventData as ServicePortEventData};
 use type_c_service::controller::event::Event as PortEvent;
 use type_c_service::controller::event_receiver::InterruptReceiver as _;
@@ -36,13 +34,6 @@ use type_c_service::define_controller_port_static_cell_channel;
 use type_c_service::service::Service;
 use type_c_service::service::config::Config;
 use type_c_service::service::registration::PortData;
-
-const CHANNEL_CAPACITY: usize = 4;
-const NUM_PD_CONTROLLERS: usize = 2;
-const CONTROLLER0_ID: ControllerId = ControllerId(0);
-const CONTROLLER1_ID: ControllerId = ControllerId(1);
-const PORT0_ID: GlobalPortId = GlobalPortId(0);
-const PORT1_ID: GlobalPortId = GlobalPortId(1);
 
 type ControllerType = Mutex<GlobalRawMutex, mock_controller::Controller<'static>>;
 type PortType = Mutex<GlobalRawMutex, Port<'static>>;
@@ -88,7 +79,7 @@ type PortEventReceiverType = PortEventReceiver<
 >;
 
 #[embassy_executor::task]
-async fn opm_task(_context: &'static Context, _state: [&'static mock_controller::ControllerState; NUM_PD_CONTROLLERS]) {
+async fn opm_task(_state: [&'static mock_controller::ControllerState; PORT_COUNT]) {
     // TODO: migrate this logic to an integration test when we move away from 'static lifetimes.
     /*const CAPABILITY: PowerCapability = PowerCapability {
         voltage_mv: 20000,
@@ -263,26 +254,10 @@ async fn task(spawner: Spawner) {
 
     embedded_services::init().await;
 
-    static CONTROLLER_CONTEXT: StaticCell<Context> = StaticCell::new();
-    let controller_context = CONTROLLER_CONTEXT.init(Context::new());
-
     static STATE0: StaticCell<mock_controller::ControllerState> = StaticCell::new();
     let state0 = STATE0.init(mock_controller::ControllerState::new());
     static CONTROLLER0: StaticCell<ControllerType> = StaticCell::new();
     let controller0 = CONTROLLER0.init(Mutex::new(mock_controller::Controller::new(state0)));
-
-    static PORT_CHANNEL0: Channel<GlobalRawMutex, ServicePortEvent, CHANNEL_CAPACITY> = Channel::new();
-    static PORT_REGISTRATION0: StaticCell<[PortRegistration; 1]> = StaticCell::new();
-    let port_registration0 = PORT_REGISTRATION0.init([PortRegistration {
-        id: PORT0_ID,
-        sender: PORT_CHANNEL0.dyn_sender(),
-        receiver: PORT_CHANNEL0.dyn_receiver(),
-    }]);
-
-    static PD_REGISTRATION0: StaticCell<Device<'static>> = StaticCell::new();
-    let pd_registration0 = PD_REGISTRATION0.init(Device::new(CONTROLLER0_ID, port_registration0));
-
-    controller_context.register_controller(pd_registration0).unwrap();
 
     define_controller_port_static_cell_channel!(pub(self), port0, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
     let PortComponents {
@@ -297,19 +272,6 @@ async fn task(spawner: Spawner) {
     let state1 = STATE1.init(mock_controller::ControllerState::new());
     static CONTROLLER1: StaticCell<ControllerType> = StaticCell::new();
     let controller1 = CONTROLLER1.init(Mutex::new(mock_controller::Controller::new(state1)));
-
-    static PORT1_CHANNEL: Channel<GlobalRawMutex, ServicePortEvent, CHANNEL_CAPACITY> = Channel::new();
-    static PORT_REGISTRATION1: StaticCell<[PortRegistration; 1]> = StaticCell::new();
-    let port_registration1 = PORT_REGISTRATION1.init([PortRegistration {
-        id: PORT1_ID,
-        sender: PORT1_CHANNEL.dyn_sender(),
-        receiver: PORT1_CHANNEL.dyn_receiver(),
-    }]);
-
-    static PD_REGISTRATION1: StaticCell<Device<'static>> = StaticCell::new();
-    let pd_registration1 = PD_REGISTRATION1.init(Device::new(CONTROLLER1_ID, port_registration1));
-
-    controller_context.register_controller(pd_registration1).unwrap();
 
     define_controller_port_static_cell_channel!(pub(self), port1, GlobalRawMutex, Mutex<GlobalRawMutex, mock_controller::Controller<'static>>);
     let PortComponents {
@@ -420,7 +382,7 @@ async fn task(spawner: Spawner) {
         )
         .expect("Failed to create interrupt splitter 1 task"),
     );
-    spawner.spawn(opm_task(controller_context, [state0, state1]).expect("Failed to create opm task"));
+    spawner.spawn(opm_task([state0, state1]).expect("Failed to create opm task"));
 }
 
 fn main() {
