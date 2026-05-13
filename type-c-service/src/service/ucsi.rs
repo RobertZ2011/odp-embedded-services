@@ -138,16 +138,7 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
                     ..
                 }))) = response
                 {
-                    let raw_port = command.port().0 as usize;
-                    let port_status = self
-                        .registration
-                        .ports()
-                        .get(raw_port)
-                        .ok_or(PdError::InvalidPort)?
-                        .lock()
-                        .await
-                        .get_port_status()
-                        .await?;
+                    let port_status = port.get_port_status().await?;
                     *battery_charging_status =
                         self.determine_battery_charging_capability_status(command.port(), &port_status);
                     states_change.set_battery_charging_status_change(battery_charging_status.is_some());
