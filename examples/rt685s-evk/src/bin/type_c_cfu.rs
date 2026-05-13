@@ -95,12 +95,12 @@ type PowerPolicyServiceType = Mutex<
 >;
 
 const PORT_COUNT: usize = 2;
-type PortRecevierType = DynamicReceiver<'static, type_c_interface::service::event::PortEventData>;
+type PortReceiverType = DynamicReceiver<'static, type_c_interface::service::event::PortEventData>;
 type TypeCServiceEventReceiverType = type_c_service::service::event_receiver::ArrayEventReceiver<
     'static,
     PORT_COUNT,
     PortType,
-    PortRecevierType,
+    PortReceiverType,
     PowerPolicyReceiverType,
 >;
 
