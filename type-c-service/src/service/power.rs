@@ -51,7 +51,7 @@ impl<'a, Reg: Registration<'a>> Service<'a, Reg> {
                     for port in self.registration.ports().iter() {
                         port.lock()
                             .await
-                            .set_unconstrained_power(ptr::eq(*port, unconstrained_port))
+                            .set_unconstrained_power(!ptr::eq(*port, unconstrained_port))
                             .await?;
                     }
                 } else {

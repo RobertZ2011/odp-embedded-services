@@ -162,32 +162,39 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
     }
 
     /// Acknowledge the current connector change and move to the next if present
-    async fn ack_connector_change(&mut self, port: &'port Reg::Port, cci: &mut GlobalCci) {
+    async fn ack_connector_change(&mut self, cci: &mut GlobalCci) {
         // Pop the just acknowledged port and move to the next if present
-        if let Some(_current_port) = self.ucsi.pending_ports.pop_front() {
-            if let Some(next_port) = self.ucsi.pending_ports.front() {
-                debug!("ACK_CCI processed, next pending port: {:?}", next_port);
-                self.broadcast_event(Event {
-                    port,
-                    event: EventData::UsciChangeIndicator(UsciChangeIndicatorData {
-                        port: *next_port,
-                        // False here because the OPM gets notified by the CCI, don't need a separate notification
-                        notify_opm: false,
-                    }),
-                })
-                .await;
-            } else {
-                debug!("ACK_CCI processed, no more pending ports");
-            }
-        } else {
+        let Some(_current_port) = self.ucsi.pending_ports.pop_front() else {
             warn!("Received ACK_CCI with no pending connector changes");
-        }
+            return;
+        };
+
+        let Some(next_port) = self.ucsi.pending_ports.front() else {
+            debug!("ACK_CCI processed, no more pending ports");
+            return;
+        };
+
+        debug!("ACK_CCI processed, next pending port: {:?}", next_port);
+        let Ok(port) = self.lookup_port(*next_port) else {
+            error!("Invalid port ID in pending ports: {:?}", next_port);
+            return;
+        };
+
+        self.broadcast_event(Event {
+            port,
+            event: EventData::UsciChangeIndicator(UsciChangeIndicatorData {
+                port: *next_port,
+                // False here because the OPM gets notified by the CCI, don't need a separate notification
+                notify_opm: false,
+            }),
+        })
+        .await;
 
         self.set_cci_connector_change(cci);
     }
 
     /// Process a UCSI command
-    pub async fn process_ucsi_command(&mut self, port: &'port Reg::Port, command: &GlobalCommand) -> UcsiResponse {
+    pub async fn process_ucsi_command(&mut self, command: &GlobalCommand) -> UcsiResponse {
         let mut next_input = Some(PpmInput::Command(command));
         let mut response = UcsiResponse {
             notify_opm: false,
@@ -257,7 +264,7 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
                         }
 
                         if ack.connector_change() {
-                            self.ack_connector_change(port, &mut response.cci).await;
+                            self.ack_connector_change(&mut response.cci).await;
                         }
 
                         return response;

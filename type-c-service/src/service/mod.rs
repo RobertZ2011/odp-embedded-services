@@ -66,7 +66,7 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
     }
 
     /// Look up the port for a given global port ID
-    fn lookup_port(&self, port_id: GlobalPortId) -> Result<&Reg::Port, Error> {
+    fn lookup_port(&self, port_id: GlobalPortId) -> Result<&'port Reg::Port, Error> {
         self.registration
             .ports()
             .get(port_id.0 as usize)
