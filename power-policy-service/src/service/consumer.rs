@@ -105,8 +105,8 @@ pub async fn find_best_consumer_default<
     Ok(best_consumer)
 }
 
-impl<'device, Reg: Registration<'device>, Cusomization: customization::Customization>
-    Service<'device, Reg, Cusomization>
+impl<'device, Reg: Registration<'device>, Customization: customization::Customization>
+    Service<'device, Reg, Customization>
 {
     /// Update unconstrained state and broadcast notifications if needed
     async fn update_unconstrained_state(&mut self) -> Result<(), Error> {

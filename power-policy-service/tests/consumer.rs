@@ -706,10 +706,10 @@ impl customization::Customization for AlwaysFirstConsumerCustomization {
     }
 }
 
-/// Verify that [`customization::Customization::find_find_best_consumer`] is called
-struct TestFindBestConsumerHook;
+/// Verify that [`customization::Customization::find_best_consumer`] is called
+struct TestFindBestConsumerCustomization;
 
-impl Test for TestFindBestConsumerHook {
+impl Test for TestFindBestConsumerCustomization {
     type Customization = AlwaysFirstConsumerCustomization;
 
     async fn run<'a>(
@@ -721,7 +721,7 @@ impl Test for TestFindBestConsumerHook {
         device1: &DeviceType<'a>,
         device1_signal: &Signal<GlobalRawMutex, (usize, FnCall)>,
     ) {
-        info!("Running TestFindBestConsumerHook");
+        info!("Running TestFindBestConsumerCustomization");
 
         // Device1 connection at high power
         {
@@ -857,7 +857,7 @@ async fn run_test_no_swap() {
 async fn run_test_find_best_consumer_hook() {
     run_test(
         DEFAULT_TIMEOUT,
-        TestFindBestConsumerHook,
+        TestFindBestConsumerCustomization,
         Default::default(),
         AlwaysFirstConsumerCustomization,
     )
