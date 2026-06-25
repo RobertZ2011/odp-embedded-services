@@ -29,7 +29,7 @@ members = [
     "odp-service-common",
     "type-c-interface",
     "fw-update-interface",
-    "fw-update-interface-mocks",
+    "fw-update-interface-test-mocks",
     "mctp-rs",
     "type-c-interface-test-mocks",
     "power-policy-interface-test-mocks",
@@ -95,7 +95,7 @@ embedded-services = { path = "./embedded-service" }
 embedded-storage-async = "0.4.1"
 embedded-usb-pd = { git = "https://github.com/OpenDevicePartnership/embedded-usb-pd", tag = "v0.1.0", default-features = false }
 fw-update-interface = { path = "./fw-update-interface" }
-fw-update-interface-mocks = { path = "./fw-update-interface-mocks" }
+fw-update-interface-test-mocks = { path = "./fw-update-interface-test-mocks" }
 mctp-rs = { path = "./mctp-rs" }
 num_enum = { version = "0.7.5", default-features = false }
 portable-atomic = { version = "1.11", default-features = false }
