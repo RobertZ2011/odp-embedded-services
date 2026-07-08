@@ -118,14 +118,15 @@ impl<
         if let Err(e) = self.psu_state.disconnect(true) {
             error!("({}): Error updating PSU state on role swap: {:?}", self.name, e);
         }
-        if self
-            .power_policy_sender
-            .try_send(power_policy_interface::psu::event::EventData::Disconnected(
-                ConsumerDisconnect::none(),
-            ))
-            .is_none()
+        if let Err(e) = self
+            .power_policy_notifier
+            .notify_disconnected(ConsumerDisconnect::none())
+            .await
         {
-            error!("({}): Failed to notify power policy of role swap disconnect", self.name);
+            error!(
+                "({}): Failed to notify power policy of role swap disconnect: {:#?}",
+                self.name, e
+            );
         }
 
         Ok(())
