@@ -38,6 +38,8 @@ bind_interrupts!(struct Irqs {
     FLEXCOMM2 => embassy_imxrt::i2c::InterruptHandler<peripherals::FLEXCOMM2>;
 });
 
+type PowerNotifier<'a> =
+    power_policy_interface::psu::event::NonBlockingSenderNotifier<DynamicSender<'a, psu::event::EventData>>;
 type SharedStateType = Mutex<GlobalRawMutex, SharedState>;
 type PortType = Mutex<
     GlobalRawMutex,
@@ -46,7 +48,7 @@ type PortType = Mutex<
         Tps6699xMutex<'static>,
         SharedStateType,
         DynamicSender<'static, type_c_interface::service::event::PortEventData>,
-        DynamicSender<'static, power_policy_interface::psu::event::EventData>,
+        PowerNotifier<'static>,
         DynamicSender<'static, type_c_service::controller::event::Loopback>,
     >,
 >;

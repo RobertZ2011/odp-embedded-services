@@ -39,6 +39,8 @@ pub type PortTypeCReceiver<'a> = DynamicReceiver<'a, type_c_interface::service::
 pub type PortPowerSender<'a> = DynamicSender<'a, power_policy_interface::psu::event::EventData>;
 /// Corresponding receiver for [`PortPowerSender`]
 pub type PortPowerReceiver<'a> = DynamicReceiver<'a, power_policy_interface::psu::event::EventData>;
+/// Power policy notification wrapper
+pub type PortPowerNotifier<'a> = power_policy_interface::psu::event::NonBlockingSenderNotifier<PortPowerSender<'a>>;
 /// [`type_c_service::controller::Port`] sender for loopback events
 pub type PortLoopbackSender<'a> = DynamicSender<'a, type_c_service::controller::event::Loopback>;
 /// Corresponding receiver for [`PortLoopbackSender`]
@@ -60,8 +62,8 @@ pub type PortMutexType<'port, 'ch> = Mutex<
         PortSharedState,
         // Sender to the type-C service
         PortTypeCSender<'ch>,
-        // Sender to the power policy
-        PortPowerSender<'ch>,
+        // Power policy notifier
+        PortPowerNotifier<'ch>,
         // Loopback sender
         PortLoopbackSender<'ch>,
     >,
@@ -215,7 +217,7 @@ macro_rules! define_port {
                     &paste! { [<$name _mock>] },
                     &paste! { [<$name _shared_state>] },
                     paste! { [<$name _type_c_sender>] },
-                    paste! { [<$name _power_policy_sender>] },
+                    paste! { [<$name _power_policy_sender>].into() },
                     paste! { [<$name _loopback_sender>] },
             )),
             mock: &paste! { [<$name _mock>] },
