@@ -1,18 +1,18 @@
 //! Code related to registration with the power policy service.
 
-use embedded_services::{event::NonBlockingSender, sync::Lockable};
-use power_policy_interface::{charger, psu, service::event::Event as ServiceEvent};
+use embedded_services::sync::Lockable;
+use power_policy_interface::{charger, psu};
 
 /// Registration trait that abstracts over various registration details.
 pub trait Registration<'device> {
     type Psu: Lockable<Inner: psu::Psu> + 'device;
-    type ServiceSender: NonBlockingSender<ServiceEvent<'device, Self::Psu>>;
+    type ServiceNotifier: power_policy_interface::service::notification::Notifier<'device, Psu = Self::Psu>;
     type Charger: Lockable<Inner: charger::Charger> + 'device;
 
     /// Returns a slice to access PSU devices
     fn psus(&self) -> &[&'device Self::Psu];
     /// Returns a slice to access power policy event senders
-    fn event_senders(&mut self) -> &mut [Self::ServiceSender];
+    fn notifiers(&mut self) -> &mut [Self::ServiceNotifier];
     /// Returns a slice to access charger devices
     fn chargers(&self) -> &[&'device Self::Charger];
 }
@@ -22,7 +22,7 @@ pub struct ArrayRegistration<
     'device,
     Psu: Lockable<Inner: psu::Psu> + 'device,
     const PSU_COUNT: usize,
-    ServiceSender: NonBlockingSender<ServiceEvent<'device, Psu>>,
+    ServiceNotifier: power_policy_interface::service::notification::Notifier<'device, Psu = Psu>,
     const SERVICE_SENDER_COUNT: usize,
     Charger: Lockable<Inner: charger::Charger> + 'device,
     const CHARGER_COUNT: usize,
@@ -32,29 +32,29 @@ pub struct ArrayRegistration<
     /// Array of registered chargers
     pub chargers: [&'device Charger; CHARGER_COUNT],
     /// Array of power policy service event senders
-    pub service_senders: [ServiceSender; SERVICE_SENDER_COUNT],
+    pub service_senders: [ServiceNotifier; SERVICE_SENDER_COUNT],
 }
 
 impl<
     'device,
     Psu: Lockable<Inner: psu::Psu> + 'device,
     const PSU_COUNT: usize,
-    ServiceSender: NonBlockingSender<ServiceEvent<'device, Psu>>,
+    ServiceNotifier: power_policy_interface::service::notification::Notifier<'device, Psu = Psu>,
     const SERVICE_SENDER_COUNT: usize,
     Charger: Lockable<Inner: charger::Charger> + 'device,
     const CHARGER_COUNT: usize,
 > Registration<'device>
-    for ArrayRegistration<'device, Psu, PSU_COUNT, ServiceSender, SERVICE_SENDER_COUNT, Charger, CHARGER_COUNT>
+    for ArrayRegistration<'device, Psu, PSU_COUNT, ServiceNotifier, SERVICE_SENDER_COUNT, Charger, CHARGER_COUNT>
 {
     type Psu = Psu;
-    type ServiceSender = ServiceSender;
+    type ServiceNotifier = ServiceNotifier;
     type Charger = Charger;
 
     fn psus(&self) -> &[&'device Self::Psu] {
         &self.psus
     }
 
-    fn event_senders(&mut self) -> &mut [Self::ServiceSender] {
+    fn notifiers(&mut self) -> &mut [Self::ServiceNotifier] {
         &mut self.service_senders
     }
 

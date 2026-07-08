@@ -10,10 +10,11 @@ pub mod task;
 
 use embedded_services::error;
 use embedded_services::named::Named;
-use embedded_services::{event::NonBlockingSender, info, sync::Lockable, trace};
+use embedded_services::{info, sync::Lockable, trace};
 
 use power_policy_interface::charger::{Charger, PsuState};
 use power_policy_interface::psu::notification::NotificationHandler as _;
+use power_policy_interface::service::notification::Notifier;
 use power_policy_interface::{
     capability::{ConsumerDisconnect, ConsumerPowerCapability, ProviderPowerCapability},
     charger::{Event as ChargerEvent, EventData as ChargerEventData},
@@ -21,7 +22,7 @@ use power_policy_interface::{
         Error, Psu,
         event::{Event as PsuEvent, EventData as PsuEventData},
     },
-    service::{UnconstrainedState, event::Event as ServiceEvent},
+    service::UnconstrainedState,
 };
 
 use crate::service::registration::Registration;
@@ -111,11 +112,42 @@ impl<'device, Reg: Registration<'device>, Customization: customization::Customiz
         total
     }
 
-    /// Send an event to all registered listeners
-    fn broadcast_event(&mut self, event: ServiceEvent<'device, Reg::Psu>) {
-        for sender in self.registration.event_senders() {
-            if sender.try_send(event).is_none() {
-                error!("Failed to send event to listener");
+    async fn notify_unconstrained(&mut self, unconstrained: UnconstrainedState) {
+        for notifier in self.registration.notifiers() {
+            if let Err(e) = notifier.notify_unconstrained(unconstrained).await {
+                error!("Failed to notify unconstrained state change: {:#?}", e);
+            }
+        }
+    }
+
+    async fn notify_consumer_connected(&mut self, psu: &'device Reg::Psu, capability: ConsumerPowerCapability) {
+        for notifier in self.registration.notifiers() {
+            if let Err(e) = notifier.notify_consumer_connected(psu, capability).await {
+                error!("Failed to notify consumer connected: {:#?}", e);
+            }
+        }
+    }
+
+    async fn notify_consumer_disconnected(&mut self, psu: &'device Reg::Psu, flags: ConsumerDisconnect) {
+        for notifier in self.registration.notifiers() {
+            if let Err(e) = notifier.notify_consumer_disconnected(psu, flags).await {
+                error!("Failed to notify consumer disconnected: {:#?}", e);
+            }
+        }
+    }
+
+    async fn notify_provider_connected(&mut self, psu: &'device Reg::Psu, capability: ProviderPowerCapability) {
+        for notifier in self.registration.notifiers() {
+            if let Err(e) = notifier.notify_provider_connected(psu, capability).await {
+                error!("Failed to notify provider connected: {:#?}", e);
+            }
+        }
+    }
+
+    async fn notify_provider_disconnected(&mut self, psu: &'device Reg::Psu) {
+        for notifier in self.registration.notifiers() {
+            if let Err(e) = notifier.notify_provider_disconnected(psu).await {
+                error!("Failed to notify provider disconnected: {:#?}", e);
             }
         }
     }

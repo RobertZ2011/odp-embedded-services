@@ -82,6 +82,12 @@ pub type PowerPolicyServiceSender<'port, 'ch> = PowerPolicyServiceEventRouter<'p
 /// Receiver for events broadcast by the power policy service
 pub type PowerPolicyServiceReceiver<'port, 'ch> =
     DynamicReceiver<'ch, power_policy_interface::service::event::Event<'port, PortMutexType<'port, 'ch>>>;
+/// Notifier for events broadcast by the power policy service
+type PowerPolicyNotifierType<'port, 'ch> = power_policy_interface::service::event::NonBlockingSenderNotifier<
+    'port,
+    PortMutexType<'port, 'ch>,
+    PowerPolicyServiceSender<'port, 'ch>,
+>;
 /// Power policy registration type
 pub type PowerPolicyRegistrationType<'port, 'ch> = power_policy_service::service::registration::ArrayRegistration<
     'port,
@@ -90,7 +96,7 @@ pub type PowerPolicyRegistrationType<'port, 'ch> = power_policy_service::service
     // PSU count
     TYPE_C_PORT_COUNT,
     // Senders for events broadcast by the service
-    PowerPolicyServiceSender<'port, 'ch>,
+    PowerPolicyNotifierType<'port, 'ch>,
     // Number of registered service event senders
     POWER_POLICY_SENDER_COUNT,
     // Charger type
@@ -389,7 +395,7 @@ pub async fn run_test(
         power_policy_service::service::registration::ArrayRegistration {
             psus: [&port0, &port1, &port2],
             chargers: [],
-            service_senders: [power_policy_service_event_router],
+            service_senders: [power_policy_service_event_router.into()],
         },
         Default::default(),
     ));
