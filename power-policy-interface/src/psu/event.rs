@@ -41,9 +41,9 @@ where
     pub event: EventData,
 }
 
-/// New-type that implements the [`crate::psu::notification::Notifier`] trait for any [`NonBlockingSender<Event>`].
+/// New-type that implements the [`crate::psu::notification::Notifier`] trait for any [`NonBlockingSender<EventData>`].
 ///
-/// This allows the user to chose blocking/non-blocking behavior when a type supports both.
+/// This allows the user to choose blocking/non-blocking behavior when a type supports both.
 pub struct NonBlockingSenderNotifier<S: NonBlockingSender<EventData>>(pub S);
 
 impl<S: NonBlockingSender<EventData>> crate::psu::notification::Notifier for NonBlockingSenderNotifier<S> {
@@ -103,9 +103,9 @@ impl<S: NonBlockingSender<EventData>> From<S> for NonBlockingSenderNotifier<S> {
     }
 }
 
-/// New-type that implements the [`crate::psu::notification::Notifier`] trait for any [`Sender<Event>`].
+/// New-type that implements the [`crate::psu::notification::Notifier`] trait for any [`Sender<EventData>`].
 ///
-/// This allows the user to chose blocking/non-blocking behavior when a type supports both.
+/// This allows the user to choose blocking/non-blocking behavior when a type supports both.
 pub struct SenderNotifier<S: Sender<EventData>>(pub S);
 
 impl<S: Sender<EventData>> crate::psu::notification::Notifier for SenderNotifier<S> {

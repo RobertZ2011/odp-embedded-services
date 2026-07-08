@@ -86,7 +86,7 @@ where
 
 /// New-type that implements the [`crate::service::notification::Notifier`] trait for any [`NonBlockingSender<Event>`].
 ///
-/// This allows the user to chose blocking/non-blocking behavior when a type supports both.
+/// This allows the user to choose blocking/non-blocking behavior when a type supports both.
 pub struct NonBlockingSenderNotifier<
     'device,
     PSU: Lockable<Inner: Psu> + 'device,
@@ -185,7 +185,7 @@ impl<'device, PSU: Lockable<Inner: Psu>, S: NonBlockingSender<Event<'device, PSU
 
 /// New-type that implements the [`crate::service::notification::Notifier`] trait for any [`Sender<Event>`].
 ///
-/// This allows the user to chose blocking/non-blocking behavior when a type supports both.
+/// This allows the user to choose blocking/non-blocking behavior when a type supports both.
 pub struct SenderNotifier<'device, PSU: Lockable<Inner: Psu> + 'device, S: Sender<Event<'device, PSU>>> {
     pub sender: S,
     _phantom: PhantomData<&'device PSU>,

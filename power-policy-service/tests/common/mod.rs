@@ -130,7 +130,7 @@ pub async fn run_test<T: Test>(timeout: Duration, mut test: T, config: Config, c
 
     let power_policy_registration = ArrayRegistration {
         psus: [&device0, &device1],
-        service_senders: [service_event_channel.dyn_sender().into()],
+        service_notifiers: [service_event_channel.dyn_sender().into()],
         chargers: [],
     };
 

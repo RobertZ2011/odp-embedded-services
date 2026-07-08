@@ -231,7 +231,7 @@ async fn main(spawner: Spawner) {
     let power_policy_registration = ArrayRegistration {
         psus: [port0, port1],
         chargers: [],
-        service_senders: [power_policy_sender.into()],
+        service_notifiers: [power_policy_sender.into()],
     };
 
     static POWER_SERVICE: StaticCell<PowerPolicyServiceType> = StaticCell::new();

@@ -395,7 +395,7 @@ pub async fn run_test(
         power_policy_service::service::registration::ArrayRegistration {
             psus: [&port0, &port1, &port2],
             chargers: [],
-            service_senders: [power_policy_service_event_router.into()],
+            service_notifiers: [power_policy_service_event_router.into()],
         },
         Default::default(),
     ));

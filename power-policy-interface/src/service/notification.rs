@@ -18,7 +18,7 @@ pub enum Error {
 pub trait Notifier<'device> {
     type Psu: Lockable<Inner: crate::psu::Psu> + 'device;
 
-    /// Notify that a consumer has disconneced
+    /// Notify that a consumer has disconnected
     fn notify_consumer_disconnected(
         &mut self,
         psu: &'device Self::Psu,

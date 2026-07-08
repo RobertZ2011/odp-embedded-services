@@ -253,7 +253,7 @@ async fn run(spawner: Spawner) {
 
     let registration = ArrayRegistration {
         psus: [device0, device1],
-        service_senders: [NoopSender.into()],
+        service_notifiers: [NoopSender.into()],
         chargers: [charger0],
     };
 
