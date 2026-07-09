@@ -25,7 +25,8 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    Customization: customization::Customization,
+> Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     /// Process a VDM event by retrieving the relevant VDM data from the `controller` for the appropriate `port`.
     pub(super) async fn process_vdm_event(
@@ -88,7 +89,8 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> type_c_interface::port::pd::Pd for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    Customization: customization::Customization,
+> type_c_interface::port::pd::Pd for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     async fn get_port_status(&mut self) -> Result<PortStatus, PdError> {
         self.controller.lock().await.get_port_status(self.port).await
@@ -178,7 +180,9 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> type_c_interface::port::pd::StateMachine for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    Customization: customization::Customization,
+> type_c_interface::port::pd::StateMachine
+    for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     async fn set_pd_state_machine_config(&mut self, config: PdStateMachineConfig) -> Result<(), PdError> {
         self.controller

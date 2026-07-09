@@ -14,7 +14,9 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> type_c_interface::port::type_c::StateMachine for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    Customization: customization::Customization,
+> type_c_interface::port::type_c::StateMachine
+    for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     async fn set_type_c_state_machine_config(&mut self, state: TypeCStateMachineState) -> Result<(), PdError> {
         self.controller

@@ -15,8 +15,9 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
+    Customization: customization::Customization,
 > type_c_interface::port::electrical_disconnect::ElectricalDisconnect
-    for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     async fn execute_electrical_disconnect(&mut self, reconnect_time_s: Option<NonZeroU8>) -> Result<(), PdError> {
         self.controller

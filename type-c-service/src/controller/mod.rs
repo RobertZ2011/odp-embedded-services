@@ -12,6 +12,7 @@ use crate::controller::event::{Event, Loopback};
 use crate::controller::state::SharedState;
 
 pub mod config;
+pub mod customization;
 pub mod electrical_disconnect;
 pub mod event;
 pub mod event_receiver;
@@ -31,6 +32,7 @@ pub struct Port<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
+    Customization: customization::Customization = customization::DefaultCustomization,
 > {
     /// Local port
     port: LocalPortId,
@@ -47,11 +49,14 @@ pub struct Port<
     /// Sender for power policy events
     power_policy_sender: PowerSender,
     /// Configuration
+    #[allow(dead_code)]
     config: config::Config,
     /// Shared state
     shared_state: &'device Shared,
     /// Loopback sender
     loopback_sender: LoopbackSender,
+    /// Customization
+    customization: Customization,
 }
 
 impl<
@@ -61,7 +66,8 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    Customization: customization::Customization + Default,
+> Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     /// Create new Port instance
     // TODO: refactor arguments into a registration struct
@@ -87,6 +93,46 @@ impl<
             shared_state,
             loopback_sender,
             type_c_sender,
+            customization: Customization::default(),
+        }
+    }
+}
+
+impl<
+    'device,
+    C: Lockable<Inner: Pd>,
+    Shared: Lockable<Inner = SharedState>,
+    TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
+    PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
+    LoopbackSender: NonBlockingSender<event::Loopback>,
+    Customization: customization::Customization,
+> Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
+{
+    /// Create a new port object with a custom customization implementation
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_customization(
+        name: &'static str,
+        config: config::Config,
+        port: LocalPortId,
+        controller: &'device C,
+        shared_state: &'device Shared,
+        type_c_sender: TypeCSender,
+        power_policy_sender: PowerSender,
+        loopback_sender: LoopbackSender,
+        customization: Customization,
+    ) -> Self {
+        Self {
+            name,
+            controller,
+            port,
+            status: PortStatus::default(),
+            psu_state: power_policy_interface::psu::State::default(),
+            power_policy_sender,
+            config,
+            shared_state,
+            loopback_sender,
+            type_c_sender,
+            customization,
         }
     }
 
@@ -236,7 +282,8 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> Named for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    Customization: customization::Customization,
+> Named for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     fn name(&self) -> &'static str {
         self.name

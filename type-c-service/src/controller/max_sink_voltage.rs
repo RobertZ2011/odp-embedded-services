@@ -14,8 +14,9 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
+    Customization: customization::Customization,
 > type_c_interface::port::max_sink_voltage::MaxSinkVoltage
-    for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     async fn set_max_sink_voltage(&mut self, voltage_mv: Option<u16>) -> Result<(), PdError> {
         // A change in the maximum sink voltage can trigger a PD renegotiation. During that transition the

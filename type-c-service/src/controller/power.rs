@@ -11,7 +11,6 @@ use power_policy_interface::{
 };
 use type_c_interface::controller::power::SystemPowerStateStatus;
 
-use crate::controller::config::UnconstrainedSink;
 use type_c_interface::util::power_policy_error_from_pd_error;
 
 use super::*;
@@ -23,22 +22,33 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    Customization: customization::Customization,
+> Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     /// Handle a new contract as consumer
     pub(super) async fn process_new_consumer_contract(&mut self, new_status: &PortStatus) -> Result<(), PdError> {
         info!("Process new consumer contract");
-        let available_sink_contract = new_status.available_sink_contract.map(|c| {
-            let mut c: ConsumerPowerCapability = c.into();
-            let unconstrained = match self.config.unconstrained_sink {
-                UnconstrainedSink::Auto => new_status.unconstrained_power,
-                UnconstrainedSink::PowerThresholdMilliwatts(threshold) => c.capability.max_power_mw() >= threshold,
-                UnconstrainedSink::Never => false,
-            };
-            c.flags.set_unconstrained_power(unconstrained);
-            c.flags.set_psu_type(PsuType::TypeC);
-            c
-        });
+
+        let available_sink_contract = match new_status.available_sink_contract {
+            Some(capability) => {
+                // Call our customization hook. Don't propagate any error to make this flow as robust as possible.
+                let mut c = self
+                    .customization
+                    .update_consumer_capability(new_status, capability.into())
+                    .await
+                    .inspect_err(|e| {
+                        error!(
+                            "({}): `update_consumer_capability` customization failed: {:#?}",
+                            self.name(),
+                            e
+                        );
+                    })
+                    .unwrap_or(capability.into());
+                c.flags.set_psu_type(PsuType::TypeC);
+                Some(c)
+            }
+            None => None,
+        };
 
         if let Err(e) = self.psu_state.update_consumer_power_capability(available_sink_contract) {
             error!("Failed to update consumer power capability: {:?}", e);
@@ -174,7 +184,8 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> Psu for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    Customization: customization::Customization,
+> Psu for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     async fn disconnect(&mut self) -> Result<(), PsuError> {
         self.controller
@@ -230,8 +241,9 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
+    Customization: customization::Customization,
 > type_c_interface::port::power::SystemPowerStateStatus
-    for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     async fn set_system_power_state_status(
         &mut self,

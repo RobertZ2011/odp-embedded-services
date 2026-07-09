@@ -14,7 +14,9 @@ impl<
     TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
     PowerSender: NonBlockingSender<power_policy_interface::psu::event::EventData>,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> type_c_interface::port::retimer::Retimer for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender>
+    Customization: customization::Customization,
+> type_c_interface::port::retimer::Retimer
+    for Port<'device, C, Shared, TypeCSender, PowerSender, LoopbackSender, Customization>
 {
     async fn get_rt_fw_update_status(&mut self) -> Result<RetimerFwUpdateState, PdError> {
         self.controller.lock().await.get_rt_fw_update_status(self.port).await
