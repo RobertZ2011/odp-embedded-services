@@ -28,7 +28,7 @@ pub struct Port<
     'device,
     C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
-    TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
+    PortNotifier: type_c_interface::port::notification::Notifier,
     PowerNotifier: power_policy_interface::psu::notification::Notifier,
     LoopbackSender: NonBlockingSender<event::Loopback>,
 > {
@@ -42,8 +42,8 @@ pub struct Port<
     name: &'static str,
     /// Cached port status
     status: PortStatus,
-    /// Sender for type-c service events
-    type_c_sender: TypeCSender,
+    /// Notifier for type-c service events
+    port_notifier: PortNotifier,
     /// Notifier for power policy events
     power_policy_notifier: PowerNotifier,
     /// Configuration
@@ -58,10 +58,10 @@ impl<
     'device,
     C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
-    TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
+    PortNotifier: type_c_interface::port::notification::Notifier,
     PowerNotifier: power_policy_interface::psu::notification::Notifier,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> Port<'device, C, Shared, TypeCSender, PowerNotifier, LoopbackSender>
+> Port<'device, C, Shared, PortNotifier, PowerNotifier, LoopbackSender>
 {
     /// Create new Port instance
     // TODO: refactor arguments into a registration struct
@@ -72,7 +72,7 @@ impl<
         port: LocalPortId,
         controller: &'device C,
         shared_state: &'device Shared,
-        type_c_sender: TypeCSender,
+        port_notifier: PortNotifier,
         power_policy_notifier: PowerNotifier,
         loopback_sender: LoopbackSender,
     ) -> Self {
@@ -86,7 +86,7 @@ impl<
             config,
             shared_state,
             loopback_sender,
-            type_c_sender,
+            port_notifier,
         }
     }
 
@@ -148,16 +148,24 @@ impl<
         )
         .await?;
 
-        let event = ServicePortEventData::StatusChanged(StatusChangedData {
+        let status_changed = StatusChangedData {
             status_event,
             previous_status: self.status,
             current_status: new_status,
-        });
+        };
         self.status = new_status;
-        if self.type_c_sender.try_send(event).is_none() {
-            error!("Failed to send port status type-C event");
+        if let Err(e) = self
+            .port_notifier
+            .notify_status_changed(
+                status_changed.status_event,
+                status_changed.previous_status,
+                status_changed.current_status,
+            )
+            .await
+        {
+            error!("Failed to send port status type-C event: {:#?}", e);
         }
-        Ok(event)
+        Ok(ServicePortEventData::StatusChanged(status_changed))
     }
 
     /// Handle a plug event
@@ -225,10 +233,10 @@ impl<
     'device,
     C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
-    TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
+    PortNotifier: type_c_interface::port::notification::Notifier,
     PowerNotifier: power_policy_interface::psu::notification::Notifier,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> Named for Port<'device, C, Shared, TypeCSender, PowerNotifier, LoopbackSender>
+> Named for Port<'device, C, Shared, PortNotifier, PowerNotifier, LoopbackSender>
 {
     fn name(&self) -> &'static str {
         self.name

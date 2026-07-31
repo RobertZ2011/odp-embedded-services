@@ -6,9 +6,17 @@
 //! Consequently [`PortNotificationEventBitfield`] implements iterator traits to allow for processing these events as a stream.
 use bitfield::bitfield;
 
+use core::future::ready;
+
+use embedded_services::event::{NonBlockingSender, Sender};
+use embedded_usb_pd::ado::Ado;
+
+use crate::control::dp::DpStatus;
+use crate::control::pd::PortStatus;
 use crate::control::vdm::AttnVdm;
 use crate::control::vdm::OtherVdm;
-
+use crate::port::notification::{Error as NotificationError, Notifier};
+use crate::service::event::{PortEventData, StatusChangedData};
 bitfield! {
     /// Raw bitfield of possible port status events
     #[derive(Copy, Clone, PartialEq, Eq, Default)]
@@ -401,6 +409,130 @@ impl From<PortNotificationEventBitfield> for PortEventBitfield {
             status: PortStatusEventBitfield::none(),
             notification,
         }
+    }
+}
+
+/// New-type that implements the [`Notifier`] trait for any [`NonBlockingSender<PortEventData>`].
+///
+/// This allows the user to choose blocking/non-blocking behavior when a type supports both.
+pub struct NonBlockingSenderNotifier<S: NonBlockingSender<PortEventData>>(pub S);
+
+impl<S: NonBlockingSender<PortEventData>> Notifier for NonBlockingSenderNotifier<S> {
+    fn notify_status_changed(
+        &mut self,
+        status_event: PortStatusEventBitfield,
+        previous_status: PortStatus,
+        current_status: PortStatus,
+    ) -> impl Future<Output = Result<(), NotificationError>> {
+        ready(
+            self.0
+                .try_send(PortEventData::StatusChanged(StatusChangedData {
+                    status_event,
+                    previous_status,
+                    current_status,
+                }))
+                .ok_or(NotificationError::WouldBlock),
+        )
+    }
+
+    fn notify_alert(&mut self, alert: Ado) -> impl Future<Output = Result<(), NotificationError>> {
+        ready(
+            self.0
+                .try_send(PortEventData::Alert(alert))
+                .ok_or(NotificationError::WouldBlock),
+        )
+    }
+
+    fn notify_vdm(&mut self, vdm: VdmData) -> impl Future<Output = Result<(), NotificationError>> {
+        ready(
+            self.0
+                .try_send(PortEventData::Vdm(vdm))
+                .ok_or(NotificationError::WouldBlock),
+        )
+    }
+
+    fn notify_discover_mode_completed(&mut self) -> impl Future<Output = Result<(), NotificationError>> {
+        ready(
+            self.0
+                .try_send(PortEventData::DiscoverModeCompleted)
+                .ok_or(NotificationError::WouldBlock),
+        )
+    }
+
+    fn notify_usb_mux_error_recovery(&mut self) -> impl Future<Output = Result<(), NotificationError>> {
+        ready(
+            self.0
+                .try_send(PortEventData::UsbMuxErrorRecovery)
+                .ok_or(NotificationError::WouldBlock),
+        )
+    }
+
+    fn notify_dp_status_update(&mut self, status: DpStatus) -> impl Future<Output = Result<(), NotificationError>> {
+        ready(
+            self.0
+                .try_send(PortEventData::DpStatusUpdate(status))
+                .ok_or(NotificationError::WouldBlock),
+        )
+    }
+}
+
+impl<S: NonBlockingSender<PortEventData>> From<S> for NonBlockingSenderNotifier<S> {
+    fn from(sender: S) -> Self {
+        Self(sender)
+    }
+}
+
+/// New-type that implements the [`Notifier`] trait for any [`Sender<PortEventData>`].
+///
+/// This allows the user to choose blocking/non-blocking behavior when a type supports both.
+pub struct SenderNotifier<S: Sender<PortEventData>>(pub S);
+
+impl<S: Sender<PortEventData>> Notifier for SenderNotifier<S> {
+    async fn notify_status_changed(
+        &mut self,
+        status_event: PortStatusEventBitfield,
+        previous_status: PortStatus,
+        current_status: PortStatus,
+    ) -> Result<(), NotificationError> {
+        self.0
+            .send(PortEventData::StatusChanged(StatusChangedData {
+                status_event,
+                previous_status,
+                current_status,
+            }))
+            .await;
+        Ok(())
+    }
+
+    async fn notify_alert(&mut self, alert: Ado) -> Result<(), NotificationError> {
+        self.0.send(PortEventData::Alert(alert)).await;
+        Ok(())
+    }
+
+    async fn notify_vdm(&mut self, vdm: VdmData) -> Result<(), NotificationError> {
+        self.0.send(PortEventData::Vdm(vdm)).await;
+        Ok(())
+    }
+
+    async fn notify_discover_mode_completed(&mut self) -> Result<(), NotificationError> {
+        self.0.send(PortEventData::DiscoverModeCompleted).await;
+        Ok(())
+    }
+
+    async fn notify_usb_mux_error_recovery(&mut self) -> Result<(), NotificationError> {
+        self.0.send(PortEventData::UsbMuxErrorRecovery).await;
+        Ok(())
+    }
+
+    async fn notify_dp_status_update(&mut self, status: DpStatus) -> Result<(), NotificationError> {
+        self.0.send(PortEventData::DpStatusUpdate(status)).await;
+        Ok(())
+    }
+}
+
+impl<S: Sender<PortEventData>> From<S> for SenderNotifier<S> {
+    fn from(sender: S) -> Self {
+        Self(sender)
     }
 }
 

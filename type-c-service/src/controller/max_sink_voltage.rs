@@ -11,11 +11,11 @@ impl<
     'device,
     C: Lockable<Inner: Pd + MaxSinkVoltage>,
     Shared: Lockable<Inner = SharedState>,
-    TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
+    PortNotifier: type_c_interface::port::notification::Notifier,
     PowerNotifier: power_policy_interface::psu::notification::Notifier,
     LoopbackSender: NonBlockingSender<event::Loopback>,
 > type_c_interface::port::max_sink_voltage::MaxSinkVoltage
-    for Port<'device, C, Shared, TypeCSender, PowerNotifier, LoopbackSender>
+    for Port<'device, C, Shared, PortNotifier, PowerNotifier, LoopbackSender>
 {
     async fn set_max_sink_voltage(&mut self, voltage_mv: Option<u16>) -> Result<(), PdError> {
         // A change in the maximum sink voltage can trigger a PD renegotiation. During that transition the

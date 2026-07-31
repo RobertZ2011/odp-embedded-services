@@ -35,6 +35,8 @@ pub type ControllerMockMutexType = Mutex<GlobalRawMutex, type_c_interface_test_m
 pub type PortTypeCSender<'a> = DynamicSender<'a, type_c_interface::service::event::PortEventData>;
 /// Corresponding receiver for [`PortTypeCSender`]
 pub type PortTypeCReceiver<'a> = DynamicReceiver<'a, type_c_interface::service::event::PortEventData>;
+/// Type-C port notification wrapper
+pub type PortTypeCNotifier<'a> = type_c_interface::port::event::NonBlockingSenderNotifier<PortTypeCSender<'a>>;
 /// [`type_c_service::controller::Port`] sender to power policy service
 pub type PortPowerSender<'a> = DynamicSender<'a, power_policy_interface::psu::event::EventData>;
 /// Corresponding receiver for [`PortPowerSender`]
@@ -61,7 +63,7 @@ pub type PortMutexType<'port, 'ch> = Mutex<
         // Shared state between the event receiver and port logic
         PortSharedState,
         // Sender to the type-C service
-        PortTypeCSender<'ch>,
+        PortTypeCNotifier<'ch>,
         // Power policy notifier
         PortPowerNotifier<'ch>,
         // Loopback sender
@@ -114,6 +116,12 @@ pub type TypeCServiceSender<'port, 'ch> =
 /// Receiver for events broadcast by the type-C service
 pub type TypeCServiceReceiver<'port, 'ch> =
     DynamicReceiver<'ch, type_c_interface::service::event::Event<'port, PortMutexType<'port, 'ch>>>;
+/// Notifier for events broadcast by the type-C service
+pub type TypeCServiceNotifier<'port, 'ch> = type_c_interface::service::event::NonBlockingSenderNotifier<
+    'port,
+    PortMutexType<'port, 'ch>,
+    TypeCServiceSender<'port, 'ch>,
+>;
 /// Type-C service registration type
 pub type TypeCRegistrationType<'port, 'ch> = type_c_service::service::registration::ArrayRegistration<
     'port,
@@ -121,9 +129,9 @@ pub type TypeCRegistrationType<'port, 'ch> = type_c_service::service::registrati
     PortMutexType<'port, 'ch>,
     // Number of type-C ports
     TYPE_C_PORT_COUNT,
-    // Senders for events broadcast by the service
-    TypeCServiceSender<'port, 'ch>,
-    // Number of registered service event senders
+    // Notifiers for events broadcast by the service
+    TypeCServiceNotifier<'port, 'ch>,
+    // Number of registered service event notifiers
     TYPE_C_SERVICE_SENDER_COUNT,
 >;
 /// Type-C service type
@@ -222,7 +230,7 @@ macro_rules! define_port {
                     $local_id,
                     &paste! { [<$name _mock>] },
                     &paste! { [<$name _shared_state>] },
-                    paste! { [<$name _type_c_sender>] },
+                    paste! { [<$name _type_c_sender>] }.into(),
                     paste! { [<$name _power_policy_sender>].into() },
                     paste! { [<$name _loopback_sender>] },
             )),
@@ -361,7 +369,7 @@ pub async fn run_test(
                     local_port: Some(LocalPortId(0)),
                 },
             ],
-            service_senders: [type_c_service_sender],
+            service_notifiers: [type_c_service_sender.into()],
         },
     ));
 

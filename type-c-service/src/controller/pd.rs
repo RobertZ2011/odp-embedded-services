@@ -22,10 +22,10 @@ impl<
     'device,
     C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
-    TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
+    PortNotifier: type_c_interface::port::notification::Notifier,
     PowerNotifier: power_policy_interface::psu::notification::Notifier,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> Port<'device, C, Shared, TypeCSender, PowerNotifier, LoopbackSender>
+> Port<'device, C, Shared, PortNotifier, PowerNotifier, LoopbackSender>
 {
     /// Process a VDM event by retrieving the relevant VDM data from the `controller` for the appropriate `port`.
     pub(super) async fn process_vdm_event(
@@ -48,8 +48,8 @@ impl<
         };
 
         let event = ServicePortEventData::Vdm(vdm_data);
-        if self.type_c_sender.try_send(event).is_none() {
-            error!("Failed to send VDM type-C event");
+        if let Err(e) = self.port_notifier.notify_vdm(vdm_data).await {
+            error!("Failed to send VDM type-C event: {:#?}", e);
         }
         Ok(Some(event))
     }
@@ -59,8 +59,8 @@ impl<
         debug!("({}): Processing DP status update event", self.name);
         let status = self.controller.lock().await.get_dp_status(self.port).await?;
         let event = ServicePortEventData::DpStatusUpdate(status);
-        if self.type_c_sender.try_send(event).is_none() {
-            error!("Failed to send DP status update type-C event");
+        if let Err(e) = self.port_notifier.notify_dp_status_update(status).await {
+            error!("Failed to send DP status update type-C event: {:#?}", e);
         }
         Ok(event)
     }
@@ -70,8 +70,8 @@ impl<
         debug!("({}): PD alert: {:#?}", self.name, ado);
         if let Some(ado) = ado {
             let event = ServicePortEventData::Alert(ado);
-            if self.type_c_sender.try_send(event).is_none() {
-                error!("Failed to send PD alert type-C event");
+            if let Err(e) = self.port_notifier.notify_alert(ado).await {
+                error!("Failed to send PD alert type-C event: {:#?}", e);
             }
             Ok(Some(event))
         } else {
@@ -85,10 +85,10 @@ impl<
     'device,
     C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
-    TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
+    PortNotifier: type_c_interface::port::notification::Notifier,
     PowerNotifier: power_policy_interface::psu::notification::Notifier,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> type_c_interface::port::pd::Pd for Port<'device, C, Shared, TypeCSender, PowerNotifier, LoopbackSender>
+> type_c_interface::port::pd::Pd for Port<'device, C, Shared, PortNotifier, PowerNotifier, LoopbackSender>
 {
     async fn get_port_status(&mut self) -> Result<PortStatus, PdError> {
         self.controller.lock().await.get_port_status(self.port).await
@@ -175,10 +175,10 @@ impl<
     'device,
     C: Lockable<Inner: Pd + StateMachine>,
     Shared: Lockable<Inner = SharedState>,
-    TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
+    PortNotifier: type_c_interface::port::notification::Notifier,
     PowerNotifier: power_policy_interface::psu::notification::Notifier,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> type_c_interface::port::pd::StateMachine for Port<'device, C, Shared, TypeCSender, PowerNotifier, LoopbackSender>
+> type_c_interface::port::pd::StateMachine for Port<'device, C, Shared, PortNotifier, PowerNotifier, LoopbackSender>
 {
     async fn set_pd_state_machine_config(&mut self, config: PdStateMachineConfig) -> Result<(), PdError> {
         self.controller

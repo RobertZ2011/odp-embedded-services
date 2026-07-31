@@ -8,7 +8,6 @@ use embedded_usb_pd::ucsi::ppm::state_machine::{
 };
 use embedded_usb_pd::ucsi::{GlobalCommand, ResponseData, lpm, ppm};
 use embedded_usb_pd::{PdError, PowerRole};
-use type_c_interface::service::event::{Event, UsciChangeIndicatorData};
 use type_c_interface::ucsi::Lpm as _;
 
 use super::*;
@@ -180,14 +179,8 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
             return;
         };
 
-        self.broadcast_event(Event {
-            port,
-            event: EventData::UsciChangeIndicator(UsciChangeIndicatorData {
-                port: *next_port,
-                // False here because the OPM gets notified by the CCI, don't need a separate notification
-                notify_opm: false,
-            }),
-        });
+        // notify_opm is false here because the OPM gets notified by the CCI, no separate notification needed
+        self.notify_ucsi_change_indicator(port, *next_port, false).await;
 
         self.set_cci_connector_change(cci);
     }
@@ -381,13 +374,7 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
         // of the CCI response to the ACK_CC_CI command. See [`Self::set_cci_connector_change`]
         let notify_opm = self.ucsi.pending_ports.is_empty();
         if self.ucsi.pending_ports.push_back(port_id).is_ok() {
-            self.broadcast_event(Event {
-                port,
-                event: EventData::UsciChangeIndicator(UsciChangeIndicatorData {
-                    port: port_id,
-                    notify_opm,
-                }),
-            });
+            self.notify_ucsi_change_indicator(port, port_id, notify_opm).await;
         } else {
             // This shouldn't happen because we have a single slot per port
             // Would likely indicate that an invalid port ID got in somehow

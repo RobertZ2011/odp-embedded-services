@@ -1,19 +1,22 @@
 use core::marker::PhantomData;
 use core::ptr;
 
-use embedded_services::event::NonBlockingSender as _;
 use embedded_services::named::Named as _;
 use embedded_services::sync::Lockable;
 use embedded_services::{debug, error, info, trace};
 use embedded_usb_pd::GlobalPortId;
 use embedded_usb_pd::PdError as Error;
+use embedded_usb_pd::ado::Ado;
 use power_policy_interface::service::event::EventData as PowerPolicyEventData;
+use type_c_interface::control::dp::DpStatus;
 use type_c_interface::control::pd::PortStatus;
+use type_c_interface::port::event::VdmData;
+use type_c_interface::port::notification::NotificationHandler;
 use type_c_interface::port::pd::Pd;
-use type_c_interface::service::event::{DebugAccessoryData, EventData, PortEvent, PortEventData};
+use type_c_interface::service::event::{PortEvent, PortEventData};
+use type_c_interface::service::notification::Notifier as _;
 
 use type_c_interface::port::event::PortStatusEventBitfield;
-use type_c_interface::service::event::Event as ServiceEvent;
 
 use crate::service::registration::Registration;
 
@@ -75,10 +78,18 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
     }
 
     /// Send an event to all registered listeners
-    fn broadcast_event(&mut self, event: ServiceEvent<'port, Reg::Port>) {
-        for sender in self.registration.event_senders() {
-            if sender.try_send(event.clone()).is_none() {
-                error!("Failed to send event to listener");
+    async fn notify_debug_accessory(&mut self, port: &'port Reg::Port, connected: bool) {
+        for notifier in self.registration.notifiers() {
+            if let Err(e) = notifier.notify_debug_accessory(port, connected).await {
+                error!("Failed to notify debug accessory: {:#?}", e);
+            }
+        }
+    }
+
+    async fn notify_ucsi_change_indicator(&mut self, port: &'port Reg::Port, port_id: GlobalPortId, notify_opm: bool) {
+        for notifier in self.registration.notifiers() {
+            if let Err(e) = notifier.notify_ucsi_change_indicator(port, port_id, notify_opm).await {
+                error!("Failed to notify UCSI change indicator: {:#?}", e);
             }
         }
     }
@@ -106,12 +117,7 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
                 debug!("({}): Debug accessory disconnected", port_name);
             }
 
-            self.broadcast_event(ServiceEvent {
-                port,
-                event: EventData::DebugAccessory(DebugAccessoryData {
-                    connected: new_status.is_connected(),
-                }),
-            });
+            self.notify_debug_accessory(port, new_status.is_connected()).await;
         }
 
         self.handle_ucsi_port_event(port, GlobalPortId(self.get_port_index(port)? as u8), event, &new_status)
@@ -121,25 +127,22 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
     }
 
     async fn process_port_event(&mut self, event: &PortEvent<'port, Reg::Port>) -> Result<(), Error> {
-        match &event.event {
-            PortEventData::StatusChanged(status_event) => {
-                self.process_port_status_event(
+        match event.event {
+            PortEventData::StatusChanged(data) => {
+                self.process_notify_status_changed(
                     event.port,
-                    status_event.status_event,
-                    status_event.current_status,
-                    status_event.previous_status,
+                    data.status_event,
+                    data.previous_status,
+                    data.current_status,
                 )
                 .await
             }
-            unhandled => {
-                // Currently just log notifications, but may want to do more in the future
-                debug!(
-                    "({}): Received notification event: {:#?}",
-                    event.port.lock().await.name(),
-                    unhandled
-                );
-                Ok(())
-            }
+            PortEventData::Alert(ado) => self.process_notify_alert(event.port, ado).await,
+            PortEventData::Vdm(vdm) => self.process_notify_vdm(event.port, vdm).await,
+            PortEventData::DiscoverModeCompleted => self.process_notify_discover_mode_completed(event.port).await,
+            PortEventData::UsbMuxErrorRecovery => self.process_notify_usb_mux_error_recovery(event.port).await,
+            PortEventData::DpStatusUpdate(status) => self.process_notify_dp_status_update(event.port, status).await,
+            _ => Ok(()),
         }
     }
 
@@ -155,5 +158,46 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
                 self.process_power_policy_event(&event).await
             }
         }
+    }
+}
+
+impl<'port, Reg: Registration<'port>> NotificationHandler<'port> for Service<'port, Reg> {
+    type Port = Reg::Port;
+
+    async fn process_notify_status_changed(
+        &mut self,
+        port: &'port Reg::Port,
+        status_event: PortStatusEventBitfield,
+        previous_status: PortStatus,
+        current_status: PortStatus,
+    ) -> Result<(), Error> {
+        self.process_port_status_event(port, status_event, current_status, previous_status)
+            .await
+    }
+
+    async fn process_notify_alert(&mut self, port: &'port Reg::Port, alert: Ado) -> Result<(), Error> {
+        // Currently just log notifications, but may want to do more in the future
+        debug!("({}): Received PD alert: {:#?}", port.lock().await.name(), alert);
+        Ok(())
+    }
+
+    async fn process_notify_vdm(&mut self, port: &'port Reg::Port, vdm: VdmData) -> Result<(), Error> {
+        debug!("({}): Received VDM: {:#?}", port.lock().await.name(), vdm);
+        Ok(())
+    }
+
+    async fn process_notify_discover_mode_completed(&mut self, port: &'port Reg::Port) -> Result<(), Error> {
+        debug!("({}): Discover mode completed", port.lock().await.name());
+        Ok(())
+    }
+
+    async fn process_notify_usb_mux_error_recovery(&mut self, port: &'port Reg::Port) -> Result<(), Error> {
+        debug!("({}): USB mux error recovery", port.lock().await.name());
+        Ok(())
+    }
+
+    async fn process_notify_dp_status_update(&mut self, port: &'port Reg::Port, status: DpStatus) -> Result<(), Error> {
+        debug!("({}): DP status update: {:#?}", port.lock().await.name(), status);
+        Ok(())
     }
 }

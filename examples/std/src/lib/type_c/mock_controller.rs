@@ -352,7 +352,9 @@ pub type Port<'a> = type_c_service::controller::Port<
     'a,
     Mutex<GlobalRawMutex, Controller<'a>>,
     Mutex<GlobalRawMutex, SharedState>,
-    channel::DynamicSender<'a, type_c_interface::service::event::PortEventData>,
+    type_c_interface::port::event::NonBlockingSenderNotifier<
+        channel::DynamicSender<'a, type_c_interface::service::event::PortEventData>,
+    >,
     PowerNotifier<'a>,
     channel::DynamicSender<'a, type_c_service::controller::event::Loopback>,
 >;

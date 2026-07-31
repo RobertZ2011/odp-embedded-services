@@ -63,7 +63,9 @@ type PortType = Mutex<
         'static,
         Tps6699xMutex<'static>,
         PortSharedStateType,
-        DynamicSender<'static, type_c_interface::service::event::PortEventData>,
+        type_c_interface::port::event::NonBlockingSenderNotifier<
+            DynamicSender<'static, type_c_interface::service::event::PortEventData>,
+        >,
         PowerNotifier<'static>,
         DynamicSender<'static, type_c_service::controller::event::Loopback>,
     >,
@@ -107,9 +109,15 @@ type TypeCServiceEventReceiverType = type_c_service::service::event_receiver::Ar
     PowerPolicyReceiverType,
 >;
 
-type TypeCServiceSenderType = NoopSender;
-type TypeCRegistrationType =
-    type_c_service::service::registration::ArrayRegistration<'static, PortType, PORT_COUNT, TypeCServiceSenderType, 1>;
+type TypeCServiceNotifierType =
+    type_c_interface::service::event::NonBlockingSenderNotifier<'static, PortType, NoopSender>;
+type TypeCRegistrationType = type_c_service::service::registration::ArrayRegistration<
+    'static,
+    PortType,
+    PORT_COUNT,
+    TypeCServiceNotifierType,
+    1,
+>;
 type TypeCServiceType = type_c_service::service::Service<'static, TypeCRegistrationType>;
 type PortEventReceiverType = PortEventReceiver<
     'static,
@@ -391,7 +399,7 @@ async fn main(spawner: Spawner) {
                     local_port: Some(LocalPortId(1)),
                 },
             ],
-            service_senders: [NoopSender],
+            service_notifiers: [NoopSender.into()],
         },
     )));
 

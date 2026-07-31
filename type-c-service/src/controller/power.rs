@@ -20,10 +20,10 @@ impl<
     'device,
     C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
-    TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
+    PortNotifier: type_c_interface::port::notification::Notifier,
     PowerNotifier: power_policy_interface::psu::notification::Notifier,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> Port<'device, C, Shared, TypeCSender, PowerNotifier, LoopbackSender>
+> Port<'device, C, Shared, PortNotifier, PowerNotifier, LoopbackSender>
 {
     /// Handle a new contract as consumer
     pub(super) async fn process_new_consumer_contract(&mut self, new_status: &PortStatus) -> Result<(), PdError> {
@@ -180,10 +180,10 @@ impl<
     'device,
     C: Lockable<Inner: Pd>,
     Shared: Lockable<Inner = SharedState>,
-    TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
+    PortNotifier: type_c_interface::port::notification::Notifier,
     PowerNotifier: power_policy_interface::psu::notification::Notifier,
     LoopbackSender: NonBlockingSender<event::Loopback>,
-> Psu for Port<'device, C, Shared, TypeCSender, PowerNotifier, LoopbackSender>
+> Psu for Port<'device, C, Shared, PortNotifier, PowerNotifier, LoopbackSender>
 {
     async fn disconnect(&mut self) -> Result<(), PsuError> {
         self.controller
@@ -236,11 +236,11 @@ impl<
     'device,
     C: Lockable<Inner: Pd + SystemPowerStateStatus>,
     Shared: Lockable<Inner = SharedState>,
-    TypeCSender: NonBlockingSender<type_c_interface::service::event::PortEventData>,
+    PortNotifier: type_c_interface::port::notification::Notifier,
     PowerNotifier: power_policy_interface::psu::notification::Notifier,
     LoopbackSender: NonBlockingSender<event::Loopback>,
 > type_c_interface::port::power::SystemPowerStateStatus
-    for Port<'device, C, Shared, TypeCSender, PowerNotifier, LoopbackSender>
+    for Port<'device, C, Shared, PortNotifier, PowerNotifier, LoopbackSender>
 {
     async fn set_system_power_state_status(
         &mut self,

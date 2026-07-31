@@ -52,6 +52,9 @@ macro_rules! define_controller_port_static_cell_channel {
 
             /// Type alias for the type-c service event sender
             pub type InnerTypeCSenderType = ::embassy_sync::channel::DynamicSender<'static, ::type_c_interface::service::event::PortEventData>;
+            /// Type alias for the type-c service event notifier
+            pub type InnerTypeCNotifierType =
+                ::type_c_interface::port::event::NonBlockingSenderNotifier<InnerTypeCSenderType>;
             /// Type alias for the type-c service event receiver
             pub type InnerTypeCReceiverType = ::embassy_sync::channel::DynamicReceiver<'static, ::type_c_interface::service::event::PortEventData>;
 
@@ -81,8 +84,8 @@ macro_rules! define_controller_port_static_cell_channel {
                     $controller,
                     // Shared state type
                     InnerSharedStateType,
-                    // Type-C service event sender type
-                    InnerTypeCSenderType,
+                    // Type-C service event notifier type
+                    InnerTypeCNotifierType,
                     // Power policy event sender type
                     InnerPowerPolicyNotifierType,
                     // Loopback event sender type
@@ -170,7 +173,7 @@ macro_rules! define_controller_port_static_cell_channel {
                     port,
                     controller,
                     shared_state,
-                    type_c_sender,
+                    type_c_sender.into(),
                     power_policy_sender.into(),
                     loopback_sender,
                 )));
