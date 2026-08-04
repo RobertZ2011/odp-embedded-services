@@ -142,7 +142,14 @@ impl<'port, Reg: Registration<'port>> Service<'port, Reg> {
             PortEventData::DiscoverModeCompleted => self.process_notify_discover_mode_completed(event.port).await,
             PortEventData::UsbMuxErrorRecovery => self.process_notify_usb_mux_error_recovery(event.port).await,
             PortEventData::DpStatusUpdate(status) => self.process_notify_dp_status_update(event.port, status).await,
-            _ => Ok(()),
+            e => {
+                debug!(
+                    "({}): Received unhandled port event: {:#?}",
+                    event.port.lock().await.name(),
+                    e
+                );
+                Ok(())
+            }
         }
     }
 
