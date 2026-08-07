@@ -29,6 +29,7 @@ use embassy_time::Instant;
 use embedded_cfu_protocol::protocol_definitions::{FwUpdateOffer, FwUpdateOfferResponse, FwVersion};
 use embedded_services::GlobalRawMutex;
 use embedded_services::power::policy::device::StateKind;
+use embedded_services::power::policy::flags::DisconnectReason;
 use embedded_services::power::policy::{self, action, flags};
 use embedded_services::sync::Lockable;
 use embedded_services::type_c::controller::{self, Controller, PortStatus};
@@ -267,7 +268,10 @@ where
                     ),
                     _ => {}
                 }
-                if let Err(e) = connected_consumer.disconnect(flags::Disconnect::default()).await {
+                if let Err(e) = connected_consumer
+                    .disconnect(flags::Disconnect::default().with_reason(DisconnectReason::Reset))
+                    .await
+                {
                     error!(
                         "Port{}: Error disconnecting from ConnectedConsumer after PD hard reset: {:#?}",
                         global_port_id.0, e
@@ -275,7 +279,10 @@ where
                 }
             } else if let Ok(connected_provider) = power.try_device_action::<action::ConnectedProvider>().await {
                 info!("Port{}: Disconnecting provider after hard reset", global_port_id.0);
-                if let Err(e) = connected_provider.disconnect(flags::Disconnect::default()).await {
+                if let Err(e) = connected_provider
+                    .disconnect(flags::Disconnect::default().with_reason(DisconnectReason::Reset))
+                    .await
+                {
                     error!(
                         "Port{}: Error disconnecting from ConnectedProvider after PD hard reset: {:#?}",
                         global_port_id.0, e

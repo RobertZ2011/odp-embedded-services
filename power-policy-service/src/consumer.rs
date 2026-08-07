@@ -277,7 +277,10 @@ impl PowerPolicy {
             if let Some(consumer_state) = state.current_consumer_state {
                 self.disconnect_chargers().await?;
                 self.comms_notify(CommsMessage {
-                    data: CommsData::ConsumerDisconnected(consumer_state.device_id, Disconnect::default()),
+                    data: CommsData::ConsumerDisconnected(
+                        consumer_state.device_id,
+                        Disconnect::default().with_reason(DisconnectReason::Detached),
+                    ),
                 })
                 .await;
             }
