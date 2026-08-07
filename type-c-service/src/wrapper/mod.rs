@@ -267,10 +267,7 @@ where
                     ),
                     _ => {}
                 }
-                if let Err(e) = connected_consumer
-                    .disconnect(flags::ConsumerDisconnect::default())
-                    .await
-                {
+                if let Err(e) = connected_consumer.disconnect(flags::Disconnect::default()).await {
                     error!(
                         "Port{}: Error disconnecting from ConnectedConsumer after PD hard reset: {:#?}",
                         global_port_id.0, e
@@ -278,10 +275,7 @@ where
                 }
             } else if let Ok(connected_provider) = power.try_device_action::<action::ConnectedProvider>().await {
                 info!("Port{}: Disconnecting provider after hard reset", global_port_id.0);
-                if let Err(e) = connected_provider
-                    .disconnect(flags::ConsumerDisconnect::default())
-                    .await
-                {
+                if let Err(e) = connected_provider.disconnect(flags::Disconnect::default()).await {
                     error!(
                         "Port{}: Error disconnecting from ConnectedProvider after PD hard reset: {:#?}",
                         global_port_id.0, e
