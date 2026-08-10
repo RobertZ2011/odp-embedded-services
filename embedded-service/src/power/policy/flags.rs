@@ -170,7 +170,7 @@ impl DisconnectReason {
     }
 }
 
-/// Conversion error for [`PsuType`]
+/// Conversion error for [`DisconnectReason`]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct InvalidDisconnectReason(pub u8);
