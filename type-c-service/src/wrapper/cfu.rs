@@ -3,7 +3,8 @@
 use embassy_futures::select::{Either, select};
 use embedded_cfu_protocol::protocol_definitions::*;
 use embedded_services::cfu::component::{InternalResponseData, RequestData};
-use embedded_services::power;
+use embedded_services::power::policy::device::{Device, State};
+use embedded_services::type_c::ControllerId;
 use embedded_services::type_c::controller::Controller;
 use embedded_services::{debug, error};
 
@@ -119,6 +120,41 @@ where
         InternalResponseData::ComponentPrepared
     }
 
+    /// Common logic for attempting to detach a power device in preparation for a firmware update.
+    ///
+    /// Returns true if the device was successfully detached, false otherwise.
+    async fn cfu_detach_device(
+        &self,
+        controller: &mut C::Inner,
+        state: &mut dyn DynPortState<'_>,
+        power: &Device,
+        controller_id: ControllerId,
+    ) -> bool {
+        if let Err(e) = power.detach().await {
+            error!("Controller{}: Failed to detach power device: {:?}", controller_id.0, e);
+
+            // Sync to bring the controller to a known state with all services
+            match self.sync_state_internal(controller, state).await {
+                Ok(_) => debug!(
+                    "Controller{}: Synced state after detaching power device",
+                    controller_id.0
+                ),
+                Err(Error::Pd(e)) => error!(
+                    "Controller{}: Failed to sync state after detaching power device: {:?}",
+                    controller_id.0, e
+                ),
+                Err(Error::Bus(_)) => error!(
+                    "Controller{}: Failed to sync state after detaching power device, bus error",
+                    controller_id.0
+                ),
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
     /// Process a GiveContent command
     async fn process_give_content(
         &self,
@@ -142,32 +178,46 @@ where
             // Detach from the power policy so it doesn't attempt to do anything while we are updating
             let controller_id = self.registration.pd_controller.id();
             let mut detached_all = true;
+            let mut current_consumer = None;
             for power in self.registration.power_devices {
-                info!("Controller{}: checking power device", controller_id.0);
-                if power.state().await != power::policy::device::State::Detached {
-                    info!("Controller{}: Detaching power device", controller_id.0);
-                    if let Err(e) = power.detach().await {
-                        error!("Controller{}: Failed to detach power device: {:?}", controller_id.0, e);
-
-                        // Sync to bring the controller to a known state with all services
-                        match self.sync_state_internal(controller, state).await {
-                            Ok(_) => debug!(
-                                "Controller{}: Synced state after detaching power device",
+                info!("Controller{}: detaching power devices", controller_id.0);
+                match power.state().await {
+                    State::ConnectedConsumer(_) => {
+                        if current_consumer.is_some() {
+                            // There should only be a single connected consumer
+                            // if we have more than one then something is wrong and we should reject the offer
+                            error!("Controller{}: Multiple consumers connected", controller_id.0);
+                            detached_all = false;
+                            break;
+                        } else {
+                            // Don't attempt to detach the current consumer because the power policy might try to connect a different port
+                            // which could lead to a deadlock.
+                            debug!(
+                                "Controller{}: Found connected consumer, detach deferred",
                                 controller_id.0
-                            ),
-                            Err(Error::Pd(e)) => error!(
-                                "Controller{}: Failed to sync state after detaching power device: {:?}",
-                                controller_id.0, e
-                            ),
-                            Err(Error::Bus(_)) => error!(
-                                "Controller{}: Failed to sync state after detaching power device, bus error",
-                                controller_id.0
-                            ),
+                            );
+                            current_consumer = Some(power);
                         }
-
-                        detached_all = false;
-                        break;
                     }
+                    State::Detached => {
+                        // Already detached, nothing to do
+                    }
+                    _ => {
+                        debug!("Controller{}: Detaching power device", controller_id.0);
+                        if !self.cfu_detach_device(controller, state, power, controller_id).await {
+                            detached_all = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Detach the current consumer last. This ensures that the power policy doesn't try to call back into the controller and deadlock
+            // while we are detaching the other devices.
+            if let Some(power) = current_consumer {
+                info!("Controller{}: Detaching current consumer", controller_id.0);
+                if !self.cfu_detach_device(controller, state, power, controller_id).await {
+                    detached_all = false;
                 }
             }
 
